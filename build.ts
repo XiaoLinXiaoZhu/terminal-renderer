@@ -1,7 +1,7 @@
 /**
  * 构建脚本：生成 JS + .d.ts 到 dist/
  */
-import { readdir, readFile, writeFile, rm } from 'fs/promises'
+import { readdir, readFile, writeFile, rm, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { $ } from 'bun'
 
@@ -9,13 +9,35 @@ const distDir = 'dist'
 
 // 清理 dist
 await rm(distDir, { recursive: true, force: true })
+await mkdir(distDir, { recursive: true })
 
-// 源文件列表
+// 源文件列表（排除测试）
 const srcFiles = (await readdir('src')).filter(f => f.endsWith('.ts') && !f.includes('.test.'))
 
-// 1. bun build 生成 JS
-const entrypoints = srcFiles.map(f => `src/${f}`)
-await $`bun build ${entrypoints} --outdir dist --target node --format esm --splitting --external @vue/reactivity --external string-width`
+// 1. 逐个文件用 Bun.Transpiler 转译为 JS
+const transpiler = new Bun.Transpiler({
+  loader: 'ts',
+  target: 'node',
+  tsconfig: JSON.stringify({
+    compilerOptions: {
+      module: 'ESNext',
+      target: 'ESNext',
+      verbatimModuleSyntax: true,
+    }
+  })
+})
+
+for (const file of srcFiles) {
+  const srcPath = join('src', file)
+  const content = await readFile(srcPath, 'utf-8')
+  let js = transpiler.transformSync(content)
+
+  // 修正 import 路径：.ts → .js
+  js = js.replace(/from\s+["'](\.[^"']+)\.ts["']/g, "from '$1.js'")
+
+  const outFile = file.replace(/\.ts$/, '.js')
+  await writeFile(join(distDir, outFile), js)
+}
 
 // 2. tsc 生成 .d.ts
 await $`npx tsc --project tsconfig.build.json`
