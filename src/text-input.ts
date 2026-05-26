@@ -13,6 +13,7 @@ export class TextInput {
   cursorOffset: number = 0
   scrollOffset: number = 0
   stickyCol: number | null = null
+  decorations: { start: number; end: number; style: number }[] = []
 
   // paint 后更新的光标网格位置
   cursorRow: number = 0
@@ -58,7 +59,7 @@ export class TextInput {
             // 宽字符：检查下一列是否也属于自己
             const nextCol = col + 1
             if (nextCol < grid.cols && grid.ownerAt(row, nextCol) === ownerId) {
-              grid.setWideChar(row, col, ch, 0)
+              grid.setWideChar(row, col, ch, this.styleAt(charIdx))
               col++ // 跳过 continuation cell
               charIdx++
             } else {
@@ -66,7 +67,7 @@ export class TextInput {
               grid.setChar(row, col, ' ', 0)
             }
           } else {
-            grid.setChar(row, col, ch, 0)
+            grid.setChar(row, col, ch, this.styleAt(charIdx))
             charIdx++
           }
         } else {
@@ -197,6 +198,14 @@ export class TextInput {
     }
 
     return adjusted
+  }
+
+  /** 获取 charIdx 位置的装饰样式，无装饰返回 0 */
+  private styleAt(charIdx: number): number {
+    for (const d of this.decorations) {
+      if (charIdx >= d.start && charIdx < d.end) return d.style
+    }
+    return 0
   }
 
   // --- 内部辅助 ---
