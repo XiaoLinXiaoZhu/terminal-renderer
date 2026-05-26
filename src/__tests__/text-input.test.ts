@@ -498,6 +498,41 @@ describe('TextInput — Step 2.2: 垂直光标移动', () => {
     // target: row 0, col 2 → 'l' → cursorOffset = 2
     expect(ti.cursorOffset).toBe(2)
   })
+
+  test('空行导航：stickyCol 跨越空行保持', () => {
+    const grid = Grid.create(10, 5)
+    grid.setOwnerAll('input')
+    const ti = new TextInput()
+    ti.text = '1231123\n\n123'
+    ti.cursorOffset = 4 // col 4 on first line
+    ti.paint(grid, 'input')
+    expect(ti.cursorCol).toBe(4)
+
+    // Down to empty line
+    ti.moveDown(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(1)
+    expect(ti.cursorCol).toBe(0) // empty line end
+    expect(ti.stickyCol).toBe(4)
+
+    // Down to "123"
+    ti.moveDown(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(2)
+    expect(ti.cursorCol).toBe(3) // end of "123", stickyCol=4 > length
+
+    // Up back to empty line
+    ti.moveUp(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(1)
+    expect(ti.cursorCol).toBe(0)
+
+    // Up back to first line - should restore col 4
+    ti.moveUp(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(0)
+    expect(ti.cursorCol).toBe(4)
+  })
 })
 
 describe('TextInput — Step 2.3: 滚动', () => {

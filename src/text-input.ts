@@ -241,7 +241,7 @@ export class TextInput {
 
         const ch = this.text[charIdx]!
         if (ch === '\n') {
-          if (row === targetRow && col >= targetCol) return charIdx
+          if (row === targetRow) return charIdx
           charIdx++
           skipToNextRow = true
           continue
