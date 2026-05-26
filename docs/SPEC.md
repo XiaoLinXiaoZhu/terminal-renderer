@@ -1,279 +1,416 @@
 # terminal-renderer 设计规格
 
-基于 ownflow 的终端混合渲染引擎。
+基于虚拟网格的终端渲染引擎。
+
+---
 
 ## 核心原则
 
-1. **终端永远不替我折行** — 写入的每行宽度 ≤ cols
-2. **物理模型是 own 状态** — Screen 精确知道终端上有什么
-3. **diff 在终端行粒度** — `physicalRows[i] !== terminalRows[i]` 纯字符串比较
-4. **resize 不需要特殊逻辑** — cols 变 → terminalRows 全变 → diff 自然全量重写
-5. **live-height 声明式** — `min(termRows, contentHeight, maxHeight)`
-6. **光标绑定文本位置** — own 状态是 TextPosition，屏幕位置全部 derived
-7. **单一写入者** — 每个 own 只有一个模块写入
+1. **Grid 是 SSOT** — 虚拟网格是唯一的渲染状态来源
+2. **Ownership 决定一切** — 每个格子有归属，Widget 只写自己的格子
+3. **Paint 全量，flush 精准** — 每次重绘所有内容，但只上屏变化的部分
+4. **终端完全虚拟化** — Grid 和物理终端解耦，上屏是唯一耦合点
+5. **不做自动布局** — 空间分配由应用层响应式声明，Grid 不干预
+6. **光标是文本偏移** — charIndex 是 primary state，网格坐标是 derived
 
-## 数据管线
+---
 
-```
-Text（原始字符串，own by InputBuffer）
-  → TextLine（按 \n 拆分）
-    → InputLine（绑定 cols 切分，derived）
-      → InputArea（绑定 liveHeight 裁剪视口，derived）
-        → TerminalRow（Screen 消费 + diff + ANSI 输出）
-```
-
-## 数据流图
-
-```mermaid
-flowchart TB
-    subgraph External["外部"]
-        STDIN["stdin raw bytes"]
-        RESIZE["resize event"]
-        APP["应用层"]
-    end
-
-    subgraph TermSize["TermSize"]
-        TS_cols["own: cols"]
-        TS_rows["own: rows"]
-    end
-
-    subgraph KeyParser["KeyParser"]
-        KP_event["own: keyEvent {seq, action}"]
-    end
-
-    subgraph Completion["Completion"]
-        CO_active["own: active, prefix, selectedIndex"]
-        CO_output["own: outputKeyEvents"]
-        CO_menu["derived: menuLines"]
-    end
-
-    subgraph InputBuffer["InputBuffer"]
-        IB_lines["own: textLines[]"]
-        IB_cursor["own: cursorLine, cursorOffset"]
-        IB_sticky["own: stickyCol"]
-    end
-
-    subgraph Layout["Layout"]
-        LO_inputLines["derived: inputLines"]
-        LO_termRows["derived: terminalRows"]
-        LO_cursor["derived: cursorPos"]
-        LO_live["derived: liveHeight"]
-        LO_wrap["derived: wrapMeta"]
-    end
-
-    subgraph Screen["Screen"]
-        SC_physical["own: physicalRows"]
-        SC_cursor["own: physicalCursor"]
-    end
-
-    RESIZE --> TermSize
-    STDIN --> KeyParser
-    APP -->|"candidates, maxHeight"| Completion
-    APP -->|"content"| Layout
-
-    TermSize -->|"cols"| Layout
-    TermSize -->|"cols"| Screen
-    TermSize -->|"rows"| Layout
-    KeyParser -->|"keyEvents"| Completion
-    Completion -->|"outputKeyEvents"| InputBuffer
-    Completion -->|"menuLines"| APP
-    Layout -->|"wrapMeta"| InputBuffer
-
-    InputBuffer -->|"textLines, cursor"| Layout
-    InputBuffer -->|"textLines, cursor"| Completion
-
-    Layout -->|"terminalRows, cursorPos, liveHeight"| Screen
-    Screen -->|"ANSI"| TTY["stderr"]
-```
-
-## 模块规格
-
-### TermSize
-- **own**: `cols: number`, `rows: number`
-- **watch**: `resizeEvent: { seq, cols, rows }`
-- 纯数据持有
-
-### KeyParser
-- **own**: `keyEvents: { seq, actions: Action[] }`
-- **watch**: `rawInput: { seq, data: string }`
-- 解析 raw bytes → Action（char/arrow/submit/abort/paste/tab）
-- 处理 bracketed paste（跨 chunk 状态机）
-
-### Completion
-- **watch**: `textLines`, `cursorLine`, `cursorOffset`（检测 `@` 触发）
-- **watch**: `keyEvents`（拦截 Tab/→/Esc）
-- **watch**: `candidates: string[]`
-- **own**: `active`, `prefix`, `selectedIndex`, `outputKeyEvents`
-- **derived**: `filteredCandidates`, `menuLines`
-- 激活时：Tab 切换、→ 接受（发射 backspace+paste 到 outputKeyEvents）、其余透传
-- 非激活时：全部透传
-
-### InputBuffer
-- **watch**: `keyEvents`（from Completion.outputKeyEvents）
-- **watch**: `wrapMeta`（from Layout，用于终端行级光标移动）
-- **own**: `textLines[]`, `cursorLine`, `cursorOffset`, `stickyCol`
-- 光标 own 状态是 TextPosition（文本行 + 字符间隙偏移）
-- Up/Down 通过 wrapMeta 在 InputLine 级别移动，反算回 TextPosition
-- 左右/插入/删除重置 stickyCol
-
-### Layout
-- **watch**: `cols`, `rows`, `textLines`, `cursorLine`, `cursorOffset`, `maxHeight`
-- **derived**:
-  - `inputLines`: textLines 按 cols 切分后的 InputLine[]
-  - `wrapMeta`: 每个文本行的折行 span 信息（供 InputBuffer 光标移动）
-  - `liveHeight`: min(rows, inputLines.length, maxHeight)
-  - `scrollOffset`: 保证光标在视口内
-  - `terminalRows`: inputLines[scrollOffset..scrollOffset+liveHeight] 的文本
-  - `cursorPos`: 光标在视口内的 {row, col}
-- 纯计算，无 own，无副作用
-
-### Screen
-- **watch**: `terminalRows`, `cursorPos`, `liveHeight`, `cols`, `freezeSeq`
-- **own**: `physicalRows[]`, `physicalCursor`
-- **on terminalRows 变化**:
-  1. 用当前 cols 计算 physicalRows 实际占多少物理行（处理 resize reflow）
-  2. cursor-up 到 live zone 顶部
-  3. clearDown
-  4. 逐行写入新 terminalRows（或 diff 优化：跳过未变行）
-  5. 定位光标到 cursorPos
-  6. 更新 physicalRows/physicalCursor
-- **on cursorPos 变化**（内容未变时）: 仅重定位光标
-- **on freezeSeq 变化**: 光标移到 live zone 末尾 → 换行 → 重置 physicalRows
-
-## 光标移动模型
+## 架构
 
 ```
-光标 own 状态: TextPosition { line: number, offset: number }
-
-Up 键按下:
-  1. TextPosition → InputLinePosition (通过 wrapMeta 查找 offset 所在 inputLine)
-  2. inputLine - 1（上移一个输入行）
-  3. 用 stickyCol 在目标 inputLine 中反算 → 新的 TextPosition
-  4. 写回 own 状态
-
-stickyCol:
-  - 首次垂直移动时记录当前可见列
-  - 连续垂直移动保持
-  - 任何非垂直操作重置为 null
+@vue/reactivity (watchEffect)
+          │
+          ▼
+┌─────────────────────────────────────┐
+│         Paint Cycle                  │
+│                                      │
+│  textInput.paint(grid, 'input')      │
+│  menu.paint(grid, 'menu')            │
+│  ...                                 │
+│                                      │
+│  grid.flush(stream)                  │
+└─────────────────────────────────────┘
+          │
+          ▼
+┌─────────────────────────────────────┐
+│         Grid (GridStore)             │
+│                                      │
+│  chars[][]  styles[][]  owners[][]   │
+│  flags[][]  dirty[][]                │
+│                                      │
+│  setChar() → 值比较 → 标记 dirty     │
+│  flush()   → 输出 dirty cells → ANSI │
+└─────────────────────────────────────┘
+          │
+          ▼
+      stderr (终端)
 ```
 
-## live-height
+---
 
-```
-liveHeight = min(terminalRows, contentRequiredHeight, maxHeight)
-```
+## Grid 规格
 
-- Screen 精确管理 liveHeight 行
-- cursor-up 计算考虑 reflow（resize 后旧行可能占更多物理行）
-- freeze = 释放 live zone 为 scrollback，physicalRows 清空
-
-## resize 处理
-
-```
-cols 变化
-  → inputLines 全部重新切分（derived 重算）
-  → terminalRows 全部变化
-  → Screen diff 发现全不同 → 全量重写
-  → 同时：cursor-up 需要考虑旧 physicalRows 在新 cols 下的 reflow
-    physicalRowCount = sum(ceil(visibleWidth(row) / newCols))
-```
-
-## 补全菜单
-
-```
-用户输入 '@' (行首或空白后)
-  → Completion 激活，prefix = ""
-  → menuLines 产出候选列表
-  → 应用层将 menuLines 插入 cursorLine+1 处
-  → Layout 渲染合成内容
-  → Screen 渲染
-
-Tab → selectedIndex 循环
-→ → 接受：删除 @prefix，插入完整候选文本
-继续输入 → prefix 更新 → filteredCandidates 过滤
-光标离开 @ 区域 → Completion 关闭
-```
-
-## 依赖
-
-- `ownflow` — 响应式模块架构
-- `@vue/reactivity` — reactive primitives (ownflow peer dep)
-- `string-width` — CJK/emoji 可见宽度计算
-- `picocolors` — 终端颜色（可选）
-
-## 最小原型 (MVP)
-
-### 1. 渲染原语
-
-#### VNode
+### 存储模型 (SoA)
 
 ```typescript
-type VNodeTag = 'root' | 'textinput' | 'selector' | 'text' | 'inline-block' | 'ghost-text'
-
-interface VNode {
-  tag: VNodeTag
-  attrs?: Record<string, string | number | boolean>
-  children?: (string | VNode)[]
+class Grid {
+  readonly rows: number
+  readonly cols: number
+  
+  // 多表格并行数组
+  private chars: string[][]      // 字符内容
+  private styles: number[][]     // 样式编码 (uint32)
+  private owners: string[][]     // 归属标识
+  private flags: number[][]      // bit flags
+  private dirty: boolean[][]     // 脏标记
+  
+  // 写入（含 dirty tracking）
+  setChar(row: number, col: number, char: string, style: number): void
+  setOwner(row: number, col: number, owner: string): void
+  
+  // 读取
+  charAt(row: number, col: number): string
+  styleAt(row: number, col: number): number
+  ownerAt(row: number, col: number): string
+  flagsAt(row: number, col: number): number
+  
+  // 上屏
+  flush(stream: NodeJS.WritableStream): void
+  
+  // 重建（resize 时）
+  static create(cols: number, rows: number): Grid
 }
 ```
 
-| 原语 | 类型 | 描述 |
-|------|------|------|
-| **VNode** | `interface` | 虚拟节点树，tag 枚举严格限定原语类型 |
-| **TextInput** | `own` | 多行文本输入框，own: `textLines[]`, `cursor{line,offset}`, `focus`, `placeholder` |
-| **GhostText** | `component` | 灰显提示文本，绑定 TextInput，在光标后渲染占位建议 |
-| **StyleRange** | `data` | `{ start, end, fg, bg, bold?, italic? }`，文本片段样式描述 |
-| **InlineBlock** | `layout` | 行内块级元素，width 固定，height 由内容撑开，参与折行 |
-| **Selector** | `own` | 列表选择器，own: `items[]`, `selectedIndex`, `open` |
-| **Flow** | `engine` | 布局引擎，接收原语树，产出 TerminalRow[]，接管 diff + 渲染 |
+### setChar 的行为
 
-### 2. 用例映射
-
-| # | 用例 | 所需原语 | 数据流 |
-|---|------|----------|--------|
-| 1 | **聊天输入框** — 多行文本 + @补全 + ghost hint + 菜单选择 | TextInput, GhostText, Selector, Flow | TextInput.textLines → Layout → Screen；@ 触发 Completion → menuLines → Selector → Layout → Screen；GhostText 检查 prefix 后附加 hint |
-| 2 | **表单渲染器** — 标签/输入/校验状态 | VNode(root→text+textinput), StyleRange, Flow | VNode 树编译 → TerminalRow[] → Screen；StyleRange 映射校验错误 → 红色 fg；TextInput focus 驱动校验状态变化 |
-| 3 | **列表选取** — 输入过滤 + 上下翻页 + 高亮 | TextInput, Selector, Flow | TextInput.value 作为 filter → Selector.items 过滤；↑↓ → selectedIndex 变化 → Selector 发出 outputKeyEvents → Layout 重算 terminalRows |
-| 4 | **富文本展示** — 标题/正文/代码块/内联样式 | VNode(root→text,inline-block), StyleRange, InlineBlock, Flow | VNode 树深度遍历 → 行内块占据固定 col 宽度 → Flow 折行引擎按 cols 切分 → 样式合并到每个 TerminalRow 的 StyleRange[] |
-
-### 3. Flow 布局算法（InlineBlock 折行）
-
-```
-输入: VNode 树, cols: number
-输出: TerminalRow[]
-
-算法:
-  1. 先序遍历 VNode 树，收集平坦的 InlineSegment[]:
-     - 'text' 节点 → TextSegment { content: string, style }
-     - 'inline-block' 节点 → BlockSegment { width: number, content: VNode[] }
-     - 'textinput'/'selector'/'ghost-text' 展开为对应的 InlineSegment
-  2. 从左到右扫描 InlineSegment[]，按 cols 折行:
-     - 维护当前行剩余宽度 rem = cols
-     - TextSegment: 用 string-width 测量可见宽度 w
-       - w ≤ rem → 追加到当前行，rem -= w
-       - w > rem → 换行（新行 rem = cols），跨行时按 rem 做首次截断，后续完整行 w ≤ cols
-     - BlockSegment: blockWidth = min(width, cols)
-       - blockWidth ≤ rem → 追加（占位高度=展平文本所需行数），rem -= blockWidth
-       - blockWidth > rem → 换行到新行首
-     - 跨行时继承当前 StyleRange（样式不中断）
-  3. 每个完成的行打包为 TerminalRow { text: string, styles: StyleRange[] }
-  4. 返回 TerminalRow[] → 送入 Screen
+```typescript
+setChar(row, col, char, style) {
+  if (this.chars[row][col] === char && this.styles[row][col] === style) return
+  this.chars[row][col] = char
+  this.styles[row][col] = style
+  this.dirty[row][col] = true
+}
 ```
 
-### 4. MVP 边界
+值相同 → 不标记 dirty → 不上屏。这使得全量 paint 的性能开销降到最低。
 
-**范围内 (In scope):**
-- Flow 引擎支持 VNode 树到 TerminalRow 的编译，含样式合并、折行、行内块定位
-- TextInput 作为核心交互原语，支持多行文本、focus/blur、光标移动、字符插入删除
-- GhostText 绑定 TextInput，基于前缀匹配展示灰显建议
-- StyleRange 支持基础 16 色 + 粗体/斜体
-- InlineBlock 固定宽度渲染，内容影响行高
-- Selector 支持键盘上下选择、高亮当前项、收起/展开
+### 宽字符写入
 
-**范围外 (Out of scope):**
-- 鼠标事件处理（仅键盘导航）
-- 终端超 256 色（16 色足够 MVP）
-- 嵌套滚动（Flow 内无独立滚动容器）
-- 富文本编辑（TextInput 仅纯文本输入）
-- 异步虚拟列表（Selector 数据全量在内存）
-- 国际化/双向文本（仅 LTR + ASCII/CJK 子集）
+```typescript
+// 写入宽字符 '你' 到 (row, col)：
+setChar(row, col, '你', style)        // 主 cell
+setChar(row, col + 1, '', style)      // continuation cell
+setFlags(row, col + 1, IS_CONTINUATION)
+
+// 如果 col+1 已有内容（被覆盖）：
+// 如果 col+1 本身是某个宽字符的主 cell → 需要清除 col+2 的 continuation
+// 如果 col 本身是某个宽字符的 continuation → 需要清除 col-1 的主 cell
+// 这些边界处理在写入工具函数中统一处理
+```
+
+### flush 的行为
+
+```typescript
+flush(stream) {
+  let lastRow = -1, lastCol = -1
+  let currentStyle = 0
+  
+  for (let row = 0; row < this.rows; row++) {
+    for (let col = 0; col < this.cols; col++) {
+      if (!this.dirty[row][col]) continue
+      if (this.flags[row][col] & IS_CONTINUATION) continue  // 跳过 continuation
+      
+      // 移动光标（优化：连续 cell 不需要移动）
+      if (row !== lastRow || col !== lastCol + 1) {
+        stream.write(cursorTo(row, col))
+      }
+      
+      // 设置样式（优化：样式相同不重复输出）
+      if (this.styles[row][col] !== currentStyle) {
+        currentStyle = this.styles[row][col]
+        stream.write(sgrFromEncoded(currentStyle))
+      }
+      
+      // 写入字符
+      stream.write(this.chars[row][col])
+      lastRow = row
+      lastCol = col
+      
+      this.dirty[row][col] = false
+    }
+  }
+  
+  // 定位终端光标到 focused widget 的光标位置
+  stream.write(cursorTo(focusCursorRow, focusCursorCol))
+}
+```
+
+---
+
+## Widget 规格
+
+### 通用接口
+
+```typescript
+interface Widget {
+  paint(grid: Grid, ownerId: string): void
+}
+```
+
+Widget 没有统一基类，只需实现 paint。paint 时：
+1. 遍历 Grid 的所有 (row, col)
+2. 检查 `grid.ownerAt(row, col) === ownerId`
+3. 如果是自己的格子 → 写入内容
+4. 如果不是 → 跳过
+
+### TextInput
+
+```typescript
+class TextInput implements Widget {
+  // reactive state
+  text: string                    // 文本内容
+  cursorOffset: number            // 光标位置（charIndex）
+  scrollOffset: number            // 滚动偏移
+  stickyCol: number | null        // 垂直移动记忆列
+  
+  // computed (derived)
+  cursorRow: number               // 光标网格行（paint 后更新）
+  cursorCol: number               // 光标网格列（paint 后更新）
+  
+  paint(grid: Grid, ownerId: string): void {
+    let charIdx = this.scrollOffset  // 从 scrollOffset 开始灌入
+    
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) !== ownerId) continue
+        
+        // 记录光标网格位置
+        if (charIdx === this.cursorOffset) {
+          this.cursorRow = row
+          this.cursorCol = col
+        }
+        
+        // 写入字符
+        if (charIdx < this.text.length) {
+          const ch = this.text[charIdx]
+          const w = charWidth(ch)
+          
+          if (w === 2) {
+            // 检查当前行剩余连续空间是否 >= 2
+            if (col + 1 < grid.cols && grid.ownerAt(row, col + 1) === ownerId) {
+              grid.setChar(row, col, ch, this.style)
+              grid.setChar(row, col + 1, '', this.style)
+              grid.setFlags(row, col + 1, IS_CONTINUATION)
+              col++  // 跳过 continuation
+            } else {
+              // 放不下 → 当前格子留空格，继续到下一个位置
+              grid.setChar(row, col, ' ', 0)
+              continue  // 不递增 charIdx，下一个格子再试
+            }
+          } else {
+            grid.setChar(row, col, ch, this.style)
+          }
+          charIdx++
+        } else {
+          // 文本已结束，剩余格子写空格
+          grid.setChar(row, col, ' ', 0)
+        }
+      }
+    }
+    
+    // 如果光标在文本末尾且未在遍历中定位到
+    if (this.cursorOffset >= this.text.length) {
+      // cursorRow/cursorCol 在最后一个字符之后的位置
+    }
+  }
+  
+  // 编辑操作
+  insertChar(ch: string): void {
+    this.text = this.text.slice(0, this.cursorOffset) + ch + this.text.slice(this.cursorOffset)
+    this.cursorOffset++
+    this.stickyCol = null
+  }
+  
+  deleteBeforeCursor(): void {
+    if (this.cursorOffset === 0) return
+    this.text = this.text.slice(0, this.cursorOffset - 1) + this.text.slice(this.cursorOffset)
+    this.cursorOffset--
+    this.stickyCol = null
+  }
+  
+  moveLeft(): void {
+    if (this.cursorOffset > 0) this.cursorOffset--
+    this.stickyCol = null
+  }
+  
+  moveRight(): void {
+    if (this.cursorOffset < this.text.length) this.cursorOffset++
+    this.stickyCol = null
+  }
+  
+  moveUp(grid: Grid, ownerId: string): void {
+    // 用当前 cursorRow/cursorCol 找上一行同 col 的 charIndex
+    const targetRow = this.cursorRow - 1
+    const targetCol = this.stickyCol ?? this.cursorCol
+    if (this.stickyCol === null) this.stickyCol = this.cursorCol
+    
+    // 遍历 Grid，找 (targetRow, targetCol) 处对应的 charIndex
+    this.cursorOffset = this.resolveCharIndex(grid, ownerId, targetRow, targetCol)
+  }
+  
+  moveDown(grid: Grid, ownerId: string): void {
+    // 类似 moveUp，targetRow = cursorRow + 1
+  }
+  
+  // 辅助：从 (targetRow, targetCol) 反查 charIndex
+  private resolveCharIndex(grid: Grid, ownerId: string, targetRow: number, targetCol: number): number {
+    let charIdx = this.scrollOffset
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) !== ownerId) continue
+        if (grid.flagsAt(row, col) & IS_CONTINUATION) continue
+        if (row === targetRow && col >= targetCol) return charIdx
+        if (row > targetRow) return charIdx  // 过了目标行，取该行首个
+        charIdx++
+      }
+    }
+    return charIdx
+  }
+}
+```
+
+### Menu
+
+```typescript
+class Menu implements Widget {
+  items: string[]
+  selectedIndex: number
+  
+  paint(grid: Grid, ownerId: string): void {
+    let itemIdx = 0
+    let colInItem = 0
+    
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) !== ownerId) continue
+        
+        if (itemIdx >= this.items.length) {
+          grid.setChar(row, col, ' ', 0)
+          continue
+        }
+        
+        const item = this.items[itemIdx]
+        const style = itemIdx === this.selectedIndex ? HIGHLIGHT_STYLE : NORMAL_STYLE
+        
+        if (colInItem < item.length) {
+          grid.setChar(row, col, item[colInItem], style)
+          colInItem++
+        } else {
+          grid.setChar(row, col, ' ', style)  // 填充行尾
+        }
+      }
+      // 每行结束换到下一个 item
+      itemIdx++
+      colInItem = 0
+    }
+  }
+}
+```
+
+---
+
+## 响应式驱动
+
+```typescript
+import { ref, computed, watchEffect } from '@vue/reactivity'
+
+// 创建 Grid
+const cols = ref(process.stderr.columns)
+const rows = ref(process.stderr.rows)
+const grid = Grid.create(cols.value, rows.value)
+
+// 声明 ownership（响应式）
+const menuOpen = ref(false)
+const menuHeight = 5
+
+watchEffect(() => {
+  // 重置所有 ownership
+  grid.setOwnerAll('textInput')
+  
+  // 如果菜单打开，分配菜单区域
+  if (menuOpen.value) {
+    const anchorRow = textInput.cursorRow + 1
+    for (let r = anchorRow; r < anchorRow + menuHeight && r < grid.rows; r++) {
+      for (let c = 0; c < grid.cols; c++) {
+        grid.setOwner(r, c, 'menu')
+      }
+    }
+  }
+})
+
+// Paint cycle
+watchEffect(() => {
+  textInput.paint(grid, 'textInput')
+  if (menuOpen.value) menu.paint(grid, 'menu')
+  grid.flush(process.stderr)
+})
+```
+
+---
+
+## Resize 处理
+
+```typescript
+process.stderr.on('resize', () => {
+  const newCols = process.stderr.columns
+  const newRows = process.stderr.rows
+  
+  // 1. 计算旧内容在新宽度下占多少行（预测终端 reflow）
+  const reflowedHeight = grid.computeReflowHeight(newCols)
+  
+  // 2. 清除旧内容（基于新宽度下的行数）
+  grid.clearFromTerminal(process.stderr, reflowedHeight)
+  
+  // 3. 重建 Grid
+  grid.resize(newCols, newRows)
+  
+  // 4. 更新 reactive 的 cols/rows → 触发 ownership 重算 + repaint
+  cols.value = newCols
+  rows.value = newRows
+})
+```
+
+---
+
+## 样式编码
+
+样式用 `uint32` 编码，避免对象分配和 GC 压力：
+
+```typescript
+// 编码方案（32 bit）:
+// bits  0-3:  fg color (0=default, 1-8=基本色, 9-15=保留)
+// bits  4-7:  bg color
+// bits  8-11: flags (bold=0x01, dim=0x02, italic=0x04, underline=0x08)
+// bits 12-31: 保留（未来扩展 256 色/true color）
+
+const BOLD = 1 << 8
+const DIM = 1 << 9
+const ITALIC = 1 << 10
+const UNDERLINE = 1 << 11
+
+function encodeStyle(fg: number, bg: number, flags: number): number {
+  return (fg & 0xF) | ((bg & 0xF) << 4) | (flags & 0xF00)
+}
+
+function sgrFromEncoded(style: number): string {
+  // 解码 → 生成 SGR 序列
+}
+```
+
+---
+
+## 依赖
+
+- `@vue/reactivity` — 响应式状态管理
+- `string-width` — CJK/emoji 可见宽度计算

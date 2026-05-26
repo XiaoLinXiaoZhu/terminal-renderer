@@ -1,556 +1,422 @@
 # Roadmap
 
-每一步独立可验收：实现 → 写测试 → 跑 demo → 确认通过。不跳过、不并行。
+每一步独立可验收。验收 = 测试通过 + demo 可运行。
 
 ---
 
-## 阶段 0: 基础设施
+## 阶段 0: Grid 核心
 
-> **🧪 突变测试已集成**：每个模块的纯函数都通过 `bun run mutate` 验证（使用 stryker-mutator），确保测试套件能有效捕获逻辑错误。
+### Step 0.1 — Grid 数据存储
 
-### ✅ Step 0.1 — ANSI Builder
-**产出**: `src/ansi.ts`
+**产出**: `src/grid.ts` — GridStore 类
 
-纯函数，构建 ANSI escape code。不依赖终端，不写 stderr。
+SoA 存储模型，基础读写 API。
 
 ```typescript
-// 核心 API
-sgr({ fg: 'red', bold: true })        // → "\x1b[31;1m"
-sgr.reset()                            // → "\x1b[0m"
-cursor.up(n)                           // → "\x1b[nA"
-cursor.down(n)                         // → "\x1b[nB"
-cursor.to(row, col)                    // → "\x1b[row;colH"
-cursor.hide() / cursor.show()
-erase.screenEnd()                      // → "\x1b[0J"
-erase.lineEnd()                        // → "\x1b[0K"
+const grid = Grid.create(80, 24)
+grid.setChar(0, 0, 'A', styleNormal)
+grid.charAt(0, 0)  // 'A'
+grid.setOwner(0, 0, 'input')
+grid.ownerAt(0, 0)  // 'input'
 ```
 
-- [ ] **auto**: 每个函数的输出字符串断言
-- [ ] **auto**: 组合样式（fg+bg+bold+italic）输出正确序列
-- [ ] **auto**: reset 在多个样式后正确重置
+- [ ] **auto**: create 创建指定尺寸的 Grid，默认全空格
+- [ ] **auto**: setChar/charAt 读写正确
+- [ ] **auto**: setOwner/ownerAt 读写正确
+- [ ] **auto**: flags 读写正确（IS_CONTINUATION）
+- [ ] **auto**: setChar 相同值不标记 dirty
+- [ ] **auto**: setChar 不同值标记 dirty
 - [ ] **human**: 无
 
-### ✅ Step 0.2 — string-width 封装
-**产出**: `src/width.ts`
+### Step 0.2 — 宽字符处理
 
-封装 `string-width`，提供统一的宽度计算入口。为什么封装：未来可能换库或加缓存。
+**产出**: `src/grid.ts` + `src/width.ts`
+
+宽字符写入时自动设置 continuation cell。覆盖 continuation cell 时自动清理关联的主 cell。
 
 ```typescript
-width(s: string): number           // 可见宽度
-width.slice(s, start, end): string // 按宽度截取子串
+grid.setWideChar(0, 0, '你', style)
+// grid[0][0] = '你', grid[0][1] = '' + IS_CONTINUATION
+
+grid.setChar(0, 1, 'x', style)
+// 覆盖 continuation → 先清除 grid[0][0] 的 '你'（变为空格）
+// 然后 grid[0][1] = 'x'
 ```
 
-- [ ] **auto**: ASCII 字符宽度=1
-- [ ] **auto**: CJK 字符宽度=2
-- [ ] **auto**: emoji 宽度正确
-- [ ] **auto**: width.slice 在 CJK 边界正确切割
+- [ ] **auto**: 宽字符写入正确设置 continuation
+- [ ] **auto**: 覆盖 continuation cell 时清理主 cell
+- [ ] **auto**: 覆盖主 cell 时清理 continuation
+- [ ] **auto**: 宽字符在行末放不下时的处理（留空格）
+- [ ] **auto**: string-width 封装：ASCII=1, CJK=2
 - [ ] **human**: 无
 
-### ✅ Step 0.3 — VNode 类型 + h() 工厂
-**产出**: `src/vnode.ts`
+### Step 0.3 — Flush 上屏
 
-定义 6 种 tag 的 TypeScript 类型和 h() 工厂函数。
+**产出**: `src/grid.ts` — flush 方法
+
+遍历 dirty cells，生成 ANSI 序列写入输出流。
+
+- [ ] **auto**: 无 dirty cells → 无输出
+- [ ] **auto**: 单个 dirty cell → 正确的 move + style + char 序列
+- [ ] **auto**: 连续 dirty cells → 批量输出（不重复 move）
+- [ ] **auto**: 样式变化时输出 SGR
+- [ ] **auto**: flush 后 dirty 标记清除
+- [ ] **human**: 终端显示正确
+
+### Step 0.4 — Demo: Hello Grid
+
+**产出**: `demo/hello.ts`
+
+硬编码文本写入 Grid，flush 到终端。验证基础管线通畅。
+
+- [ ] **auto**: 无
+- [ ] **human**: 终端显示带颜色的文本，CJK 正确
+
+---
+
+## 阶段 1: TextInput 基础
+
+### Step 1.1 — TextInput paint（无交互）
+
+**产出**: `src/text-input.ts`
+
+TextInput.paint() 能把文本灌入 owned cells。支持自动折行和 CJK。
 
 ```typescript
-h('root', {}, [
-  h('text', { value: 'hello' }),
-  h('textinput', { focus: true }, [])
-])
+const ti = new TextInput()
+ti.text = '你好 world hello'
+ti.paint(grid, 'input')
+// Grid 中正确显示折行后的文本
 ```
 
-- [ ] **auto**: h() 返回正确的 VNode 结构
-- [ ] **auto**: 嵌套 children 树正确
-- [ ] **auto**: attrs 类型检查（非法 attr 报 TS 错误）
+- [ ] **auto**: 短文本正确填入
+- [ ] **auto**: 超宽文本自动折行（文本流到下一行的 owned cells）
+- [ ] **auto**: CJK 字符正确处理（不截断）
+- [ ] **auto**: CJK 在行尾放不下时留空格跳行
+- [ ] **auto**: 文本结束后剩余格子填空格
+- [ ] **auto**: 只写入 owner 匹配的格子
 - [ ] **human**: 无
+
+### Step 1.2 — TextInput 光标定位
+
+**产出**: `src/text-input.ts` — cursorRow/cursorCol 在 paint 时计算
+
+- [ ] **auto**: cursorOffset=0 → 光标在首个 owned cell
+- [ ] **auto**: cursorOffset=text.length → 光标在最后一个字符之后
+- [ ] **auto**: CJK 后光标位置正确（跳过 continuation）
+- [ ] **auto**: 折行后光标行列正确
+- [ ] **human**: 无
+
+### Step 1.3 — TextInput 编辑操作
+
+**产出**: `src/text-input.ts` — insertChar, deleteBeforeCursor, moveLeft, moveRight
+
+- [ ] **auto**: insertChar 插入并移动光标
+- [ ] **auto**: deleteBeforeCursor 删除并回退光标
+- [ ] **auto**: moveLeft 到头不溢出
+- [ ] **auto**: moveRight 到尾不溢出
+- [ ] **auto**: 编辑操作重置 stickyCol
+- [ ] **human**: 无
+
+### Step 1.4 — Demo: 交互式单行输入
+
+**产出**: `demo/input.ts`
+
+stdin raw mode + 按键解析 + TextInput + Grid flush。可以打字和移动光标。
+
+- [ ] **auto**: 无
+- [ ] **human**: 终端中输入字符、移动光标、删除、超宽折行、CJK 正确
 
 ---
 
-## 阶段 1: 纯文本折行 (Flow 引擎核心)
+## 阶段 2: 多行 + 垂直导航
 
-### Step 1.1 — 简单折行（无样式）
-**产出**: `src/flow.ts` — `layoutSimple(text: string, cols: number): string[]`
+### Step 2.1 — 换行支持
 
-输入纯文本和列宽，输出按 cols 折行的字符串数组。这是 Flow 引擎的最简内核。
+**产出**: `src/text-input.ts` — 文本中的 `\n` 处理
 
-```
-输入: "hello world this is a long text", cols=10
-输出: ["hello worl", "d this is ", "a long tex", "t"]
-```
+TextInput 的 text 中可以包含 `\n`。paint 时遇到 `\n` 就跳到下一行的第一个 owned cell。
 
-- [ ] **auto**: 空字符串 → [""]
-- [ ] **auto**: 短文本 < cols → 1 行
-- [ ] **auto**: 精确等于 cols → 1 行
-- [ ] **auto**: 超 cols → 多行，每行 ≤ cols
-- [ ] **auto**: CJK 字符折行正确（不截断半个字符）
-- [ ] **auto**: 换行符 `\n` 强制断行
+- [ ] **auto**: `\n` 正确断行
+- [ ] **auto**: 多行文本正确灌入
+- [ ] **auto**: Enter 键 → 在光标处插入 `\n`
+- [ ] **auto**: Backspace 在行首 → 删除 `\n`，合并行
 - [ ] **human**: 无
 
-### Step 1.2 — 多文本行折行 + wrapMeta
-**产出**: `src/flow.ts` — `layoutTextLines(lines: string[], cols: number): { rows: string[], wrapMeta: WrapMeta[] }`
+### Step 2.2 — 垂直光标移动
 
-多行文本折行，同时产出 wrapMeta（每个文本行折成了哪几个输入行）供光标上下移动使用。
+**产出**: `src/text-input.ts` — moveUp, moveDown, stickyCol
+
+- [ ] **auto**: moveUp 到上一行同列位置
+- [ ] **auto**: moveDown 到下一行同列位置
+- [ ] **auto**: stickyCol 在连续垂直移动时保持
+- [ ] **auto**: 目标行比 stickyCol 短时定位到行尾
+- [ ] **auto**: 非垂直操作重置 stickyCol
+- [ ] **auto**: 第一行 moveUp 不动
+- [ ] **auto**: 最后一行 moveDown 不动
+- [ ] **human**: 无
+
+### Step 2.3 — 滚动
+
+**产出**: `src/text-input.ts` — scrollOffset 管理
+
+内容超出 owned cells 行数时，通过 scrollOffset 滚动。
+
+- [ ] **auto**: 内容不超出 → scrollOffset = 0
+- [ ] **auto**: 光标移出视口底部 → scrollOffset 增加
+- [ ] **auto**: 光标移出视口顶部 → scrollOffset 减少
+- [ ] **auto**: 滚动后 paint 正确（从 scrollOffset 位置开始灌入）
+- [ ] **human**: 无
+
+### Step 2.4 — Demo: 多行编辑器
+
+**产出**: `demo/editor.ts`
+
+完整多行编辑体验。
+
+- [ ] **auto**: 无
+- [ ] **human**: 多行输入、↑↓ 正确跳转、滚动、resize 重排
+
+---
+
+## 阶段 3: Ownership 动态 + Menu
+
+### Step 3.1 — Ownership 响应式切换
+
+**产出**: ownership 动态变更 + TextInput 自适应
+
+当 ownership 变化时，TextInput 下次 paint 自动重排文本（因为可用格子变了）。
+
+- [ ] **auto**: ownership 变化后 TextInput 重排正确
+- [ ] **auto**: 区域缩小时文本折行变化
+- [ ] **auto**: 区域恢复时文本折行恢复
+- [ ] **human**: 无
+
+### Step 3.2 — Menu Widget
+
+**产出**: `src/menu.ts`
+
+- [ ] **auto**: items 正确渲染到 owned cells
+- [ ] **auto**: selectedIndex 项高亮
+- [ ] **auto**: selectNext/selectPrev 循环
+- [ ] **human**: 无
+
+### Step 3.3 — Menu + TextInput 集成
+
+**产出**: 完整的 @mention 流程
+
+```
+输入 @ → menuOpen = true → ownership 切换 → Menu paint
+↑↓ → 切换选项
+Enter → 选中文本写入 TextInput → menuOpen = false → ownership 恢复
+Esc → 关闭菜单
+```
+
+- [ ] **auto**: 菜单打开时 ownership 正确
+- [ ] **auto**: TextInput 文本绕开菜单区域
+- [ ] **auto**: 选中后文本正确插入
+- [ ] **auto**: 关闭后区域恢复
+- [ ] **human**: 无
+
+### Step 3.4 — Demo: @mention 输入框
+
+**产出**: `demo/mention.ts`
+
+- [ ] **auto**: 无
+- [ ] **human**: 完整的 @mention 交互体验
+
+---
+
+## 阶段 4: 文本环绕 + Resize
+
+### Step 4.1 — 非连续 Ownership 区域
+
+**产出**: 验证文本在不连续区域中的正确灌入
+
+```
+ownership:
+  row 0: [I I I I I I I I I I]
+  row 1: [I I I I P P P I I I]  (P = panel)
+  row 2: [I I I I P P P I I I]
+  row 3: [I I I I I I I I I I]
+```
+
+- [ ] **auto**: 文本正确绕过 P 区域
+- [ ] **auto**: 光标跳过 P 区域的格子
+- [ ] **auto**: ↑↓ 在环绕区域正确导航
+- [ ] **human**: 无
+
+### Step 4.2 — Resize 处理
+
+**产出**: resize 事件处理
+
+- [ ] **auto**: computeReflowHeight 正确计算
+- [ ] **auto**: resize 后 Grid 尺寸更新
+- [ ] **auto**: resize 后 ownership 重算 + repaint
+- [ ] **human**: 拖动终端窗口，内容正确重排
+
+### Step 4.3 — Demo: 环绕 + resize
+
+**产出**: `demo/wrap.ts`
+
+展示文本环绕块 + resize 的综合效果。
+
+- [ ] **auto**: 无
+- [ ] **human**: 文本在块两侧流动，resize 后正确重排
+
+---
+
+## 阶段 5: 样式 + 装饰
+
+### Step 5.1 — 样式编码与输出
+
+**产出**: `src/style.ts` — 编码/解码 + SGR 生成
+
+- [ ] **auto**: encodeStyle 正确编码 fg/bg/flags
+- [ ] **auto**: sgrFromEncoded 生成正确的 ANSI 序列
+- [ ] **auto**: flush 时样式相同不重复输出 SGR
+- [ ] **human**: 终端显示正确颜色
+
+### Step 5.2 — TextInput Decorations
+
+**产出**: TextInput 支持样式区间
 
 ```typescript
-interface WrapMeta {
-  textLineIndex: number     // 来源文本行
-  inputLineStart: number    // 第一个输入行在 rows 中的索引
-  inputLineCount: number    // 占用的输入行数
-}
+textInput.decorations = [
+  { start: 2, end: 5, style: encodeStyle(RED, 0, BOLD) }
+]
 ```
 
-- [ ] **auto**: 单行短文本 → wrapMeta: [{textLine: 0, start: 0, count: 1}]
-- [ ] **auto**: 单行长文本折 3 行 → wrapMeta count=3
-- [ ] **auto**: 多行混排（短+长+短）→ 各行 wrapMeta 索引正确
-- [ ] **auto**: `\n` 强制断行与折行混合 → wrapMeta 正确映射
-- [ ] **human**: 无
+- [ ] **auto**: decoration 区间内字符用指定样式
+- [ ] **auto**: 多个 decoration 不重叠时各自正确
+- [ ] **auto**: decoration 跨折行时正确
+- [ ] **human**: 肉眼可见颜色
 
-### Step 1.3 — 带 StyleRange 的折行
-**产出**: `src/flow.ts` — `layoutStyled(text: string, styles: StyleRange[], cols: number): TerminalRow[]`
+### Step 5.3 — Demo: 带样式的输入
 
-输入文本 + 样式范围 + 列宽，产出 TerminalRow[]。折行时自动跨行继承样式。
-
-```
-TerminalRow { text: string, styles: StyleRange[] }
-```
-
-- [ ] **auto**: 单行无样式 → TerminalRow.text = 原文，styles = [{}]
-- [ ] **auto**: 单 style 不跨行 → 1 行，styles 正确
-- [ ] **auto**: style 跨折行 → 第一行和第二行都包含对应的（调整后）style
-- [ ] **auto**: 多 style 部分重叠 → 正确合并
-- [ ] **auto**: 折行后 styles 的 start/end 偏移正确调整
-- [ ] **auto**: CJK + style → 宽度和样式都不丢失
-- [ ] **human**: 无
-
----
-
-## 阶段 2: Screen（终端渲染）
-
-### Step 2.1 — Screen 基础写入
-**产出**: `src/screen.ts`
-
-```typescript
-const screen = createScreen()
-screen.render(rows: TerminalRow[], cursorPos: ScreenPosition)
-```
-
-将 TerminalRow[] 按 ANSI 写入 stderr。首次写入无 diff——全量产出。
-
-- [ ] **auto**: ANSI 字符串包含的行数 = TerminalRow.length
-- [ ] **auto**: ANSI 字符串包含 SGR 样式码
-- [ ] **auto**: ANSI 字符串末尾包含光标定位序列
-- [ ] **auto**: 空 rows → 只移动光标
-- [ ] **human**: **终端实际渲染效果**（颜色、位置、闪烁）
-
-### Step 2.2 — Screen diff
-**产出**: `src/screen.ts` — diff 优化
-
-第二次 render 时，比较 `physicalRows[i] !== newRows[i]`，只重写变化行。
-
-- [ ] **auto**: 相同内容 → 输出不含任何行写入
-- [ ] **auto**: 仅 1 行变化 → 只重写该行
-- [ ] **auto**: 行数变化（增加/减少）→ 正确处理追加/删除
-- [ ] **auto**: diff 后光标定位正确
-- [ ] **human**: **肉眼验证无闪烁**（相同内容不闪，变化行无多余重绘）
-
-### Step 2.3 — Demo: 纯文本滚动输出
-**产出**: `apps/demo/text-scroll.ts`
-
-演示 Screen + Flow 联调效果：定时追加文本行，观察 diff 和滚动。
-
-- [ ] **auto**: 无（纯交互验证）
-- [ ] **human**: **终端中运行 30 秒**，确认：行正确折行、滚动流畅、无闪烁、CJK 显示正常
-
----
-
-## 阶段 3: TextInput（多行输入）
-
-### Step 3.1 — TextInput own 状态 + 编辑操作
-**产出**: `src/textinput.ts`
-
-```typescript
-interface TextInputState {
-  textLines: string[]
-  cursor: TextPosition
-  focus: boolean
-}
-
-// 操作函数（纯函数，输入 state → 输出新 state）
-insertChar(state, char: string): TextInputState
-deleteBeforeCursor(state): TextInputState
-deleteAfterCursor(state): TextInputState
-moveCursorLeft(state): TextInputState
-moveCursorRight(state): TextInputState
-splitLine(state): TextInputState        // Enter 键
-```
-
-- [ ] **auto**: insertChar — 单字符插入，cursor 右移
-- [ ] **auto**: deleteBeforeCursor — 删除光标左侧字符
-- [ ] **auto**: deleteAfterCursor — 删除光标右侧字符
-- [ ] **auto**: moveCursorLeft 到头不溢出
-- [ ] **auto**: moveCursorRight 到尾不溢出
-- [ ] **auto**: splitLine — 在光标处拆行为两行
-- [ ] **auto**: CJK 字符的插入/删除/光标移动正确
-- [ ] **human**: 无
-
-### Step 3.2 — 光标上下移动（按渲染行）
-**产出**: `src/textinput.ts` — `moveCursorUp(state, wrapMeta): TextInputState`
-
-用 wrapMeta 将 TextPosition 映射到渲染行，上下移动后反算回 TextPosition。
-
-- [ ] **auto**: 短文本（1 渲染行）→ Up 不变
-- [ ] **auto**: 长文本（3 渲染行）→ Up/Down 逐行跳转
-- [ ] **auto**: 从第 2 个渲染行的第 5 列 Up → 第 1 个渲染行的第 5 列（stickyCol）
-- [ ] **auto**: 目标行比 stickyCol 短 → 定位到目标行末尾
-- [ ] **auto**: stickyCol 在非垂直操作后重置
-- [ ] **human**: 无
-
-### Step 3.3 — TextInput → VNode 展开
-**产出**: `src/textinput.ts` — `expandTextInput(state, cols): InlineSegment[]`
-
-将 TextInput 展开为 InlineSegment[]，含文本 + 光标位置指示 + focus 高亮。
-
-- [ ] **auto**: 展开后 segment 数量 = 输入行数
-- [ ] **auto**: focus=false → 无光标 segment
-- [ ] **auto**: focus=true → 包含光标指示 segment
-- [ ] **human**: 无
-
-### Step 3.4 — Demo: 简单文本编辑器
-**产出**: `apps/demo/text-editor.ts`
-
-集成 TextInput + Flow + Screen。用 raw mode 接收按键，实时渲染。
+**产出**: `demo/styled.ts`
 
 - [ ] **auto**: 无
-- [ ] **human**: **终端中交互**：
-  - 输入字符显示正确
-  - 左右移动光标
-  - 超宽自动折行
-  - ↑↓ 按渲染行跳转（不离谱跳）
-  - Enter 换行
-  - Backspace 删除
-  - resize 终端窗口 → 内容自动重排
-
----
-
-## 阶段 4: GhostText（自动补全）
-
-### Step 4.1 — GhostText 状态管理
-**产出**: `src/ghosttext.ts`
-
-```typescript
-interface GhostTextState {
-  enabled: boolean           // 是否激活
-  prefix: string             // 匹配前缀
-  suggestion: string         // 建议文本（prefix 之后的部分）
-}
-```
-
-- [ ] **auto**: 前缀匹配 → suggestion 更新
-- [ ] **auto**: 无匹配 → enabled=false
-- [ ] **auto**: Tab 接受 → 发出事件（待集成）
-- [ ] **human**: 无
-
-### Step 4.2 — GhostText → VNode 展开
-**产出**: `src/ghosttext.ts` — `expandGhostText(state): InlineSegment[]`
-
-展开为 dim 色的 TextSegment，位于光标之后。
-
-- [ ] **auto**: enabled=false → 无 segment
-- [ ] **auto**: enabled=true → 1 个 dim 色 TextSegment
-- [ ] **human**: 无
-
-### Step 4.3 — GhostText + TextInput 集成
-**产出**: `src/ghosttext.ts` — 绑定 logic
-
-Tab 键在 GhostText enabled 时写入 suggestion 到 TextInput，同时清除 ghost。
-
-- [ ] **auto**: Tab 接受 → TextInput 正确插入文本
-- [ ] **auto**: 接受后 ghost 关闭
-- [ ] **auto**: 继续输入不匹配 → ghost 消失
-- [ ] **auto**: Esc → ghost 关闭但不修改 TextInput
-- [ ] **human**: 无
-
-### Step 4.4 — Demo: 带补全的输入框
-**产出**: `apps/demo/ghost-input.ts`
-
-TextInput + GhostText + Flow + Screen。固定 suggestion 列表，演示补全交互。
-
-- [ ] **auto**: 无
-- [ ] **human**: **终端中交互**：
-  - 输入前缀 → 灰色补全文本出现
-  - Tab 接受 → 文本插入，ghost 消失
-  - Esc 取消 → ghost 消失
-  - 灰色文本肉眼可辨（dim / 暗色）
-
----
-
-## 阶段 5: Selector（列表选择器）
-
-### Step 5.1 — Selector own 状态 + 导航
-**产出**: `src/selector.ts`
-
-```typescript
-interface SelectorState {
-  items: string[]
-  selectedIndex: number
-  open: boolean
-}
-
-selectNext(state): SelectorState
-selectPrev(state): SelectorState
-selectIndex(state, i): SelectorState
-toggleOpen(state): SelectorState
-```
-
-- [ ] **auto**: selectNext — selectedIndex 循环（到底 → 回 0）
-- [ ] **auto**: selectPrev — 到 0 后回末尾
-- [ ] **auto**: 空 items → open=false → selectNext 不变
-- [ ] **auto**: toggleOpen 切换状态
-- [ ] **human**: 无
-
-### Step 5.2 — Selector → InlineBlock 展开
-**产出**: `src/selector.ts` — `expandSelector(state, width): BlockSegment`
-
-Selector 展开为固定宽度的 BlockSegment，内部是 items 列表：
-
-```
-┌──────────┐
-│ item 1   │
-│ ▶ item 2 │  ← selected
-│ item 3   │
-└──────────┘
-```
-
-- [ ] **auto**: items[] → BlockSegment.width = width
-- [ ] **auto**: 选中项标记（▶ 或高亮）正确
-- [ ] **auto**: 空 items → 空 BlockSegment 或不存在
-- [ ] **human**: 无
-
-### Step 5.3 — Selector + TextInput 集成
-**产出**: `src/selector.ts` — 键盘事件拦截
-
-Selector open 时：↑↓ 导航选项、Enter 选择、Esc 关闭。
-选择后关闭 Selector，将选中文本写入 TextInput。
-
-- [ ] **auto**: Enter → 尾项 token 写入，selector 关闭
-- [ ] **auto**: Esc → selector 关闭，不修改 text
-- [ ] **auto**: 不是 selector 的按键 → 透传
-- [ ] **human**: 无
-
-### Step 5.4 — Demo: @mention 选择器
-**产出**: `apps/demo/mention-picker.ts`
-
-输入 `@` 弹出候选人列表，↑↓ 选择，Enter 选中。
-
-- [ ] **auto**: 无
-- [ ] **human**: **终端中交互**：
-  - 输入 `@` → 菜单弹出
-  - ↑↓ → 选中项高亮
-  - Enter → 文本替换为选中项，菜单关闭
-  - Esc → 菜单关闭
-  - 继续输入过滤字符 → 列表过滤
-
----
-
-## 阶段 6: InlineBlock（文本环绕）
-
-### Step 6.1 — Flow: InlineBlock 折行
-**产出**: `src/flow.ts` — InlineBlock 参与 layout 算法
-
-在 Flow 的 layout 阶段处理 BlockSegment：文本在 block 左右绕排。
-
-```
-文本文字文字文字文字
-文字文字 ┌──────┐ 文字
-文字文字 │ block │ 文字
-文字文字 └──────┘ 文字
-文字文字文字文字文字
-```
-
-- [ ] **auto**: BlockSegment 插入位置正确
-- [ ] **auto**: block 左侧文本 + block + 右侧文本 → 一行拆分为三段
-- [ ] **auto**: block 宽度 > rem → 换行到新行首
-- [ ] **auto**: block 后续文本在 block 下方继续
-- [ ] **auto**: block 内部内容正确排版（在固定宽度内）
-- [ ] **human**: 无
-
-### Step 6.2 — Demo: 文本环绕 selector
-**产出**: `apps/demo/wrap-selector.ts`
-
-一段长文本中嵌入 Selector，观察 block 绕排效果。
-
-- [ ] **auto**: 无
-- [ ] **human**: **终端中交互**：
-  - Selector 在文本流中可见
-  - 文本在 Selector 左右绕排
-  - ↑↓ 导航 → Selector 内高亮变化 → 周围文本不闪
-
----
-
-## 阶段 7: 自动高亮
-
-### Step 7.1 — Markdown inline 语法解析器
-**产出**: `src/highlight.ts` — `parseInline(text: string): { text: string, styles: StyleRange[] }`
-
-解析 markdown inline 语法：
-
-| 语法 | 渲染 |
-|------|------|
-| `**text**` | bold |
-| `__text__` | bold |
-| `*text*` | italic |
-| `_text_` | italic |
-| `` `code` `` | bg: grey / reverse |
-| `~~text~~` | strikethrough |
-
-- [ ] **auto**: 纯文本无标记 → styles=[]
-- [ ] **auto**: `**bold**` → bold StyleRange
-- [ ] **auto**: `**bold** and *italic*` → 两个不重叠 style
-- [ ] **auto**: 嵌套 `**bold *italic* more**` → bold 跨全部 + italic 跨子段
-- [ ] **auto**: 未闭合标记 → 不解析，保留原文（graceful）
-- [ ] **auto**: `` `code` `` → grey bg
-- [ ] **auto**: `~~del~~` → strikethrough
-- [ ] **human**: 无
-
-### Step 7.2 — 高亮后的文本 → VNode 展开
-**产出**: `src/highlight.ts` — `highlightText(text: string): VNode`
-
-将 markdown 文本解析后包装为带 StyleRange 的 VNode(text)。
-
-- [ ] **auto**: `**hello**` → VNode(text) with styles: [{start:0, end:5, bold:true}]
-- [ ] **auto**: 无标记 → VNode(text) with styles: []
-- [ ] **human**: 无
-
-### Step 7.3 — Demo: 富文本阅读器
-**产出**: `apps/demo/rich-text.ts`
-
-展示一段 markdown 格式文本，实时渲染样式。支持 resize。
-
-- [ ] **auto**: 无
-- [ ] **human**: **终端中交互**：
-  - `**bold**` 肉眼可见粗体
-  - `*italic*` 肉眼可见斜体
-  - `` `code` `` 肉眼可见灰底
-  - `~~strike~~` 肉眼可见删除线
-  - resize → 样式不丢失
-
----
-
-## 阶段 8: 集成 + 综合 Demo
-
-### Step 8.1 — Demo: 聊天输入框 (Use Case 1+2+3 联合)
-**产出**: `apps/demo/chat-input.ts`
-
-全功能聊天输入框：多行输入 + @mention 补全（ghost text + selector）+ markdown 实时高亮预览。
-
-- [ ] **auto**: 无
-- [ ] **human**: **终端中完全交互测试**：
-  - 多行输入 + 自动折行
-  - ↑↓ 按渲染行跳转
-  - `@` 触发 mention selector → 选人
-  - markdown 语法实时高亮
-  - resize → 一切重排正确
-  - Enter 提交 → 内容 freeze → 下一轮输入
-
-### Step 8.2 — Demo: 表单渲染器 (Use Case 2)
-**产出**: `apps/demo/form-renderer.ts`
-
-标签 + 输入框 + 校验状态（红色错误提示）。
-
-- [ ] **auto**: 无
-- [ ] **human**: **终端中交互**：
-  - VNode 树渲染正确
-  - 多个 TextInput 各自独立 focus
-  - 校验失败 → 红色文本
-  - Tab/S-Tab 切换输入框
-
-### Step 8.3 — Demo: 列表选取 (Use Case 3)
-**产出**: `apps/demo/list-selector.ts`
-
-输入过滤 → 列表更新 → 键盘选取。
-
-- [ ] **auto**: 无
-- [ ] **human**: **终端中交互**：
-  - 输入文本 → 列表实时过滤
-  - ↑↓ 切换选项
-  - 当前项高亮
-  - Enter 选中
-
-### Step 8.4 — Demo: 富文本展示 (Use Case 4)
-**产出**: `apps/demo/rich-display.ts`
-
-纯展示：带标题/正文/代码块的 markdown 文档渲染。
-
-- [ ] **auto**: 无
-- [ ] **human**: **终端中交互**：
-  - 段落正确折行
-  - 代码块灰底显示
-  - 标题 bold
-  - resize 自适应
+- [ ] **human**: 输入文本部分高亮，resize 后样式不丢失
 
 ---
 
 ## 测试策略
 
-### 自动测试（`bun test`）
-
-适用：纯函数、无终端依赖、无异步时序。
+### 单元测试
 
 ```
 src/__tests__/
-  ansi.test.ts        # ANSI 生成
-  width.test.ts       # string-width 封装
-  vnode.test.ts       # VNode 创建
-  flow.test.ts        # layoutSimple, layoutTextLines, layoutStyled, InlineBlock
-  textinput.test.ts   # 编辑操作, 光标移动
-  ghosttext.test.ts   # GhostText 状态管理
-  selector.test.ts    # Selector 导航
-  highlight.test.ts   # Markdown 解析
-  screen.test.ts      # diff 逻辑（不真正写 stderr）
+  grid.test.ts         # Grid 读写、dirty tracking
+  width.test.ts        # string-width 封装
+  text-input.test.ts   # 编辑操作、paint 结果、光标位置
+  menu.test.ts         # Menu paint、导航
+  style.test.ts        # 编码/解码
 ```
 
-### 人工验证（终端 interactive demo）
+### 端到端 snapshot 测试
 
-适用：视觉外观、交互手感、ANSI 兼容性。
+测试 helper：把 Grid 渲染为可读字符串，含光标标记。
 
-每个阶段末尾的 `apps/demo/*.ts` 都需要在真实终端中运行和肉眼验证。
-验收清单在对应 step 中标注了 `**human**`。
+```typescript
+function gridToString(grid: Grid, cursor?: {row: number, col: number}): string {
+  let result = ''
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      if (cursor && cursor.row === row && cursor.col === col) {
+        result += '|'
+      }
+      if (grid.flagsAt(row, col) & IS_CONTINUATION) continue
+      result += grid.charAt(row, col)
+    }
+    result += '\n'
+  }
+  return result.trimEnd()
+}
+
+// 用法：
+test('折行 + 光标', () => {
+  const grid = Grid.create(5, 3)
+  grid.setOwnerAll('input')
+  const ti = new TextInput()
+  ti.text = '你好world'
+  ti.cursorOffset = 3  // '你好w' 之后
+  ti.paint(grid, 'input')
+  
+  expect(gridToString(grid, { row: ti.cursorRow, col: ti.cursorCol })).toBe(
+    '你好w|\n' +
+    'orld \n' +
+    '     '
+  )
+})
+```
+
+### 人工验证
+
+每阶段末尾的 `demo/*.ts` 在终端中运行，肉眼确认效果。
 
 ---
 
 ## 依赖关系
 
 ```
-0.1 ANSI ──┐
-0.2 width ─┤
-0.3 VNode ─┘
-           ↓
-1.1 简单折行 ──→ 1.2 wrapMeta ──→ 1.3 StyleRange 折行
-                                        ↓
-2.1 Screen 写入 ──→ 2.2 diff ──→ 2.3 滚动 demo
-                                        ↓
-3.1 编辑操作 ──→ 3.2 上下跳转 ──→ 3.3 VNode 展开 ──→ 3.4 编辑器 demo
-                                        ↓
-4.1 GhostText state ──→ 4.2 展开 ──→ 4.3 集成 ──→ 4.4 补全 demo
-                                        ↓
-5.1 Selector state ──→ 5.2 展开 ──→ 5.3 集成 ──→ 5.4 mention demo
-                                        ↓
-6.1 InlineBlock 折行 ──→ 6.2 环绕 demo
-                                        ↓
-7.1 Markdown 解析 ──→ 7.2 VNode 生成 ──→ 7.3 富文本 demo
-                                        ↓
-8.x 综合 demo
+0.1 Grid 存储
+  → 0.2 宽字符
+    → 0.3 Flush
+      → 0.4 Hello demo
+        → 1.1 TextInput paint
+          → 1.2 光标定位
+            → 1.3 编辑操作
+              → 1.4 输入 demo
+                → 2.1 换行
+                  → 2.2 垂直导航
+                    → 2.3 滚动
+                      → 2.4 编辑器 demo
+                        → 3.x Menu + ownership
+                        → 4.x 环绕 + resize
+                        → 5.x 样式
 ```
 
-阶段 0-2 是基础设施，必须先完成。阶段 3-7 相对独立，但建议按序号推进（后续阶段用到前面的模块）。
+线性推进。每步建立在前一步之上。但关键区别是：**每步完成后都有可验证的端到端效果**（从 Step 0.4 开始就有 demo）。
 
 ---
 
-## 验收标准
+## 验收标准（每步）
 
-每个 step 验收通过才算完成：
-
-1. `bun test` 全部通过（auto 测试）
+1. `bun test` 全部通过
 2. `bun run typecheck` 零错误
-3. `bun run lint` 零问题
-4. `bun run mutate` (100% killed)
-5. 如有 human test，终端内运行 demo 确认效果
+3. 如有 demo，终端中运行正常
+4. 代码可读，无过度抽象
+
+---
+
+## 项目结构
+
+```
+terminal-renderer/
+├── src/
+│   ├── grid.ts           # Grid 核心（存储 + dirty + flush）
+│   ├── width.ts          # string-width 封装
+│   ├── style.ts          # 样式编码/解码/SGR
+│   ├── text-input.ts     # TextInput Widget
+│   ├── menu.ts           # Menu Widget
+│   ├── keys.ts           # 按键解析（raw stdin → action）
+│   └── index.ts          # 公共 API
+├── src/__tests__/
+│   ├── helpers/
+│   │   └── grid-to-string.ts
+│   ├── grid.test.ts
+│   ├── width.test.ts
+│   ├── text-input.test.ts
+│   ├── menu.test.ts
+│   └── style.test.ts
+├── demo/
+│   ├── hello.ts          # 阶段 0
+│   ├── input.ts          # 阶段 1
+│   ├── editor.ts         # 阶段 2
+│   ├── mention.ts        # 阶段 3
+│   ├── wrap.ts           # 阶段 4
+│   └── styled.ts         # 阶段 5
+├── package.json
+└── tsconfig.json
+```

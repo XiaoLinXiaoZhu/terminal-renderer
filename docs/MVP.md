@@ -1,122 +1,171 @@
-# terminal-renderer 最小原型 (MVP)
+# terminal-renderer MVP
 
 ## 概述
 
-terminal-renderer 是一个终端混合渲染引擎。它将声明式的 VNode 树编译为 ANSI 输出，通过差量刷新渲染到终端。
+terminal-renderer 是一个基于虚拟网格的终端渲染引擎。它将终端抽象为 `Cell[rows][cols]` 的二维缓冲区，Widget 声明式地在属于自己的格子中绘制内容，Grid 通过 dirty tracking 精准上屏。
 
-MVP 的目标：用最少的模块覆盖四个核心使用场景，每个场景可独立运行和演示。
+MVP 目标：用最少的代码证明核心模型可行——虚拟网格 + ownership + dirty flush + 交互式文本输入。
 
-## 核心原则
+---
 
-1. **终端永远不替我们折行** — 写入的每行宽度 ≤ cols，我们自己控制换行
-2. **物理行是 own 状态** — Screen 精确追踪终端上的每一行内容
-3. **diff 在行粒度** — `physicalRows[i] !== newRows[i]` 纯字符串比较，只重写变化行
-4. **resize 自愈** — cols 变 → 全量重算 terminalRows → diff 自然全量重写
-5. **光标绑定逻辑位置** — own 状态是 TextPosition（文本行+偏移），屏幕坐标全部 derived
-6. **单一写入者** — 每份 own 状态只有一个模块能修改
-7. **组合优于继承** — UI 通过 VNode 树组合，类似 HTML 的 DOM 树
-
-## 渲染原语
-
-### VNode
-
-声明式 UI 的原子类型。所有 UI 由 VNode 树描述。
-
-```typescript
-type VNodeTag = 'root' | 'textinput' | 'selector' | 'text' | 'inline-block' | 'ghost-text'
-
-interface VNode {
-  tag: VNodeTag
-  attrs?: Record<string, string | number | boolean>
-  children?: (string | VNode)[]
-}
-
-// 创建 VNode 的工厂函数
-function h(tag: VNodeTag, attrs?: VNode['attrs'], children?: VNode['children']): VNode
-```
-
-### 原语清单
+## 核心原语
 
 | 原语 | 类型 | 描述 |
 |------|------|------|
-| **VNode** | `interface` | 虚拟节点树，tag 枚举限定 6 种原语，attrs 承载属性，children 嵌套子节点 |
-| **TextInput** | `own` | 多行文本输入，own: `textLines[]`, `cursor: {line, offset}`, `focus: boolean` |
-| **GhostText** | `component` | 光标后的灰显补全提示，Tab 接受写入 TextInput |
-| **StyleRange** | `data` | `{ start, end, fg?, bg?, bold?, italic? }` 描述一段文本的样式 |
-| **InlineBlock** | `layout` | 固定宽度的行内矩形，文本在其左右绕排（类似 CSS float） |
-| **Selector** | `own` | 列表选择器，own: `items[]`, `selectedIndex`, `open`，键盘导航 |
-| **Flow** | `engine` | 布局引擎，VNode 树 → TerminalRow[]，管理 diff 及 ANSI 输出 |
+| **Grid** | 数据+引擎 | 虚拟终端缓冲区。SoA 存储 + dirty tracking + flush 上屏 |
+| **Cell** | 概念 | 网格中一个位置：char + style + owner + flags |
+| **Widget** | 接口 | paint(grid, ownerId) — 在自己的格子中绘制内容 |
+| **TextInput** | Widget | 多行文本输入。charIndex 光标 + 自动折行 + 滚动 |
+| **Menu** | Widget | 列表选择器。items + selectedIndex + 高亮 |
 
-## 数据管线
+---
 
-```
-VNode 树 (声明式)
-  → Flow.expand()   → InlineSegment[]
-    → Flow.layout()   → TerminalRow[] (按 cols 折行 + 样式合并)
-      → Screen.diff()  → 差量 ANSI 写入 stderr
-```
+## 用例映射
 
-三层分离：
-- **expand**: 树 → 平坦段（TextSegment | BlockSegment）
-- **layout**: 段 → 栅格（TerminalRow[]），处理折行和样式合并
-- **render**: 栅格 → ANSI + diff → stderr
-
-## 四个用例
-
-| # | 用例 | 原语组合 | 预期效果 |
+| # | 用例 | 原语组合 | 核心能力 |
 |---|------|----------|----------|
-| 1 | **多行输入 + 上下跳转** | TextInput + Flow | 输入超 cols 自动折行；↑↓ 按渲染行跳转（非文本行）；stickyCol 保持列位置 |
-| 2 | **Ghost text 补全** | TextInput + GhostText | 输入前缀匹配 → 光标后出现灰色提示文本；Tab 接受；Esc 消失 |
-| 3 | **列表选择器（文本环绕）** | TextInput + Selector + InlineBlock + Flow | Selector 作为 InlineBlock 插入文本流中；文本在块左右绕排；↑↓ 切换选项；Enter 选中 |
-| 4 | **自动高亮** | VNode(text) + StyleRange + Flow | `**bold**` 渲染为粗体；`` `code` `` 渲染为反色/灰底；`~~del~~` 渲染为删除线 |
+| 1 | **多行文本编辑** | Grid + TextInput | 输入/删除/光标移动/折行/滚动/resize |
+| 2 | **@mention 菜单** | Grid + TextInput + Menu | ownership 动态切换，Menu 覆盖 TextInput 区域 |
+| 3 | **文本环绕块** | Grid + TextInput + 任意 Widget | 非连续 ownership 区域，文本自然绕排 |
+| 4 | **带装饰的输入** | Grid + TextInput + 样式 | Widget 自行决定边框/竖线/高亮的绘制 |
 
-## Flow 布局算法
+---
 
+## 用例 1：多行文本编辑
+
+最核心的场景。一个 TextInput 占据整个 Grid，用户可以输入、删除、移动光标。
+
+```typescript
+const grid = Grid.create(80, 24)
+const textInput = new TextInput()
+
+// 所有格子归 textInput
+grid.setOwnerAll('input')
+
+watchEffect(() => {
+  textInput.paint(grid, 'input')
+  grid.flush(process.stderr)
+})
 ```
-输入: VNode 树, cols: number
-输出: TerminalRow[]
 
-步骤:
-  1. expand(VNode树) → InlineSegment[]
-     遍历树，展开为平坦段：
-     - 'text' → TextSegment { content, style }
-     - 'inline-block' → BlockSegment { width, children[] }
-     - 'textinput' → 按 textLines + cursor 展开为 TextSegment
-     - 'selector' → 展开为 BlockSegment（内容=items 列表）
-     - 'ghost-text' → 展开为 styled TextSegment（dim 色）
+验证点：
+- 输入 ASCII/CJK 字符正确显示
+- 超宽自动折行
+- 光标左右移动位置正确
+- ↑↓ 按渲染行跳转 + stickyCol
+- Enter 换行、Backspace 删除
+- 内容超出屏幕时滚动
+- resize 后内容正确重排
 
-  2. layout(segments, cols) → TerminalRow[]
-     从左到右扫描 segments，按 cols 折行：
-     - rem = cols（当前行剩余宽度）
-     - TextSegment(w=cw) where cw ≤ rem → 追加，rem -= cw
-     - TextSegment(w=cw) where cw > rem → 换行，新行 rem = cols - cw
-     - BlockSegment(w=bw) where bw ≤ rem → 在当前行右侧占位，rem -= bw
-     - BlockSegment(w=bw) where bw > rem → 换行到新行首
-     - 跨行时继承当前 StyleRange（样式不中断）
-     - BlockSegment 内部内容在它所占的宽度内独立排版
+---
 
-  3. 每个完成的行打包为 TerminalRow { text, styles[] }
+## 用例 2：@mention 菜单
+
+TextInput 中输入 `@` 触发菜单。菜单弹出时，应用层把菜单区域的 ownership 从 `'input'` 改为 `'menu'`。TextInput 自动跳过那些格子，文本重排。
+
+```typescript
+const menuOpen = ref(false)
+const menuAnchor = computed(() => ({ row: textInput.cursorRow + 1, col: 0 }))
+
+// Ownership 响应式声明
+watchEffect(() => {
+  grid.setOwnerAll('input')
+  if (menuOpen.value) {
+    const { row, col } = menuAnchor.value
+    for (let r = row; r < row + 5 && r < grid.rows; r++) {
+      for (let c = col; c < col + 20 && c < grid.cols; c++) {
+        grid.setOwner(r, c, 'menu')
+      }
+    }
+  }
+})
+
+// Paint cycle
+watchEffect(() => {
+  textInput.paint(grid, 'input')
+  if (menuOpen.value) menu.paint(grid, 'menu')
+  grid.flush(process.stderr)
+})
 ```
+
+验证点：
+- @ 触发菜单弹出
+- 菜单区域正确覆盖（TextInput 内容自动重排）
+- ↑↓ 切换菜单选项
+- Enter 选中，文本插入
+- Esc 关闭菜单，区域恢复
+
+---
+
+## 用例 3：文本环绕
+
+一个区块（如信息面板）占据 TextInput 中间的一块区域。TextInput 的文本在区块两侧流动。
+
+```typescript
+// 中间 5×3 的区域归 panel
+for (let r = 1; r <= 3; r++) {
+  for (let c = 30; c < 35; c++) {
+    grid.setOwner(r, c, 'panel')
+  }
+}
+// 其余归 input
+```
+
+验证点：
+- 文本在 panel 两侧自然绕排
+- 光标移动正确跳过 panel 区域
+- ↑↓ 在 panel 旁的行中正确导航
+
+---
+
+## 用例 4：带装饰的输入
+
+TextInput 自己决定如何利用边界格子画装饰（行号、边框等）。因为 Widget 拿到完整的 Grid 引用，它可以在 paint 时自行判断区域形状并绘制装饰。
+
+```typescript
+class DecoratedInput implements Widget {
+  private textInput = new TextInput()
+  
+  paint(grid: Grid, ownerId: string) {
+    // 找到自己区域的左边界，画行号
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) === ownerId) {
+          // 左边界的前 3 列画行号
+          if (col < 3) {
+            grid.setChar(row, col, lineNumberChar(row), DIM_STYLE)
+          }
+          break  // 只处理每行的第一个 owned cell
+        }
+      }
+    }
+    
+    // 剩余区域交给 textInput（跳过行号列）
+    this.textInput.paintWithOffset(grid, ownerId, 3)
+  }
+}
+```
+
+---
 
 ## MVP 边界
 
-**范围内:**
-- VNode 6 种 tag、h() 工厂、树组合
-- Flow: expand → layout → Screen 三阶段管线
-- TextInput: 多行编辑、光标左右移动、插入删除、换行
-- TextInput: 按渲染行上下跳转（wrapMeta + stickyCol）
-- GhostText: 前缀匹配 + dim 渲染 + Tab 接受
-- StyleRange: 16 色 + bold/italic/underline
-- InlineBlock: 固定宽度、内容独立排版、文本绕排
-- Selector: items[] + ↑↓ 导航 + 选中高亮 + Enter 选择
-- Screen: 行粒度 diff、ANSI 输出、光标定位
-- resize: cols 变化 → 全量重算 → diff 重写
+**范围内：**
+- Grid: SoA 存储 + setChar/setOwner + dirty tracking + flush
+- TextInput: 文本输入 + 光标 + 折行 + 滚动 + 编辑操作
+- Menu: 列表显示 + 选中高亮
+- 响应式驱动: watchEffect + paint cycle
+- Ownership 动态切换
+- CJK 宽字符 + continuation cell
+- resize 处理 (reflow-aware clear + 重建)
+- 基础样式 (16 色 + bold/dim/italic/underline)
 
-**范围外:**
+**范围外：**
+- 自动布局/flexbox
 - 鼠标事件
 - 256 色 / true color
-- 嵌套滚动容器
-- 富文本编辑（TextInput 仅纯文本）
-- 异步虚拟列表
 - RTL / 双向文本
-- 多窗口 / 分屏
+- 多光标/多焦点
+- GhostText（延后）
+- Markdown 高亮（延后）
+- ownflow 集成（延后）
