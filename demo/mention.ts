@@ -1,5 +1,5 @@
 /**
- * Demo: @mention 输入框 (Step 3.4)
+ * Demo: @mention 输入框
  *
  * 输入 @ 触发菜单弹出。↑↓ 切换选项，Enter 选中，Esc 关闭。
  * 运行: bun demo/mention.ts

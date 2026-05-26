@@ -1,5 +1,5 @@
 /**
- * Demo: Hello Grid (Step 0.4)
+ * Demo: Hello Grid
  *
  * 硬编码文本写入 Grid，flush 到终端。验证基础管线通畅。
  * 运行: bun demo/hello.ts

@@ -1,5 +1,5 @@
 /**
- * Demo: 文本环绕 + resize (Step 4.3)
+ * Demo: 文本环绕 + resize
  *
  * 展示文本在非连续 ownership 区域中环绕块流动，以及 resize 后正确重排。
  * 运行: bun demo/wrap.ts

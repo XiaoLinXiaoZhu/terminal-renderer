@@ -1,5 +1,5 @@
 /**
- * Demo: 交互式单行输入 (Step 1.4)
+ * Demo: 交互式输入
  *
  * stdin raw mode + 按键解析 + TextInput + Grid flush。
  * 运行: bun demo/input.ts
