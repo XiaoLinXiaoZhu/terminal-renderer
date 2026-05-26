@@ -14,7 +14,8 @@
   "files": [
     "dist",
     "demo",
-    "docs"
+    "docs",
+    "README.md"
   ],
   "scripts": {
     "build": "bun run build.ts",
