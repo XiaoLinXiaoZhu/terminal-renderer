@@ -16,16 +16,17 @@ export type KeyAction =
   | { type: 'unknown'; raw: Buffer }
 
 export function parseKey(buf: Buffer): KeyAction {
-  // Ctrl+C, Ctrl+D etc
-  if (buf.length === 1 && buf[0]! < 32) {
+  // Handle single-byte control characters
+  if (buf.length === 1) {
     const code = buf[0]!
-    if (code === 3) return { type: 'ctrl', key: 'c' }
-    if (code === 4) return { type: 'ctrl', key: 'd' }
-    if (code === 13) return { type: 'enter' }
-    if (code === 27) return { type: 'escape' }
-    if (code === 127) return { type: 'backspace' }
-    if (code === 8) return { type: 'backspace' }
-    return { type: 'ctrl', key: String.fromCharCode(code + 96) }
+    if (code === 127 || code === 8) return { type: 'backspace' }
+    if (code < 32) {
+      if (code === 3) return { type: 'ctrl', key: 'c' }
+      if (code === 4) return { type: 'ctrl', key: 'd' }
+      if (code === 13) return { type: 'enter' }
+      if (code === 27) return { type: 'escape' }
+      return { type: 'ctrl', key: String.fromCharCode(code + 96) }
+    }
   }
 
   // ANSI escape sequences

@@ -127,21 +127,37 @@ export class TextInput {
   // --- 垂直导航 ---
 
   moveUp(grid: Grid, ownerId: string): void {
-    const targetRow = this.cursorRow - 1
-    if (targetRow < 0) return
-
     const targetCol = this.stickyCol ?? this.cursorCol
     if (this.stickyCol === null) this.stickyCol = this.cursorCol
+
+    const targetRow = this.cursorRow - 1
+    if (targetRow < 0) {
+      // 有内容在视口上方：回退 scrollOffset 并重新定位
+      if (this.scrollOffset > 0) {
+        const prevStart = this.findPrevVisualLineStart(grid, ownerId)
+        if (prevStart < this.scrollOffset) {
+          this.cursorOffset = prevStart + this.visualColToCharCount(prevStart, targetCol, grid, ownerId)
+        }
+      }
+      return
+    }
 
     this.cursorOffset = this.resolveCharIndex(grid, ownerId, targetRow, targetCol)
   }
 
   moveDown(grid: Grid, ownerId: string): void {
-    const targetRow = this.cursorRow + 1
-    if (targetRow >= grid.rows) return
-
     const targetCol = this.stickyCol ?? this.cursorCol
     if (this.stickyCol === null) this.stickyCol = this.cursorCol
+
+    const targetRow = this.cursorRow + 1
+    if (targetRow >= grid.rows) {
+      // 有内容在视口下方：前进到下一视觉行
+      const nextStart = this.findNextVisualLineStart(grid, ownerId)
+      if (nextStart > this.cursorOffset && nextStart <= this.text.length) {
+        this.cursorOffset = nextStart + this.visualColToCharCount(nextStart, targetCol, grid, ownerId)
+      }
+      return
+    }
 
     this.cursorOffset = this.resolveCharIndex(grid, ownerId, targetRow, targetCol)
   }
@@ -356,5 +372,103 @@ export class TextInput {
     const lastNewline = before.lastIndexOf('\n')
     if (lastNewline >= 0) return lastNewline + 1
     return 0
+  }
+
+  /** 从当前光标行末找到下一个视觉行的起始 charIdx */
+  private findNextVisualLineStart(grid: Grid, ownerId: string): number {
+    // 模拟 paint 从 scrollOffset 开始，找到光标所在视觉行的末尾
+    let charIdx = this.scrollOffset
+    let onCursorRow = false
+    for (let row = 0; row < grid.rows; row++) {
+      let skipToNextRow = false
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) !== ownerId) continue
+        if (skipToNextRow) continue
+
+        if (row === this.cursorRow) onCursorRow = true
+
+        if (charIdx >= this.text.length) return this.text.length
+
+        if (onCursorRow && row > this.cursorRow) {
+          // 刚过光标行 → 当前 charIdx 就是下一行起始
+          return charIdx
+        }
+
+        const ch = this.text[charIdx]!
+        if (ch === '\n') {
+          if (row === this.cursorRow) return charIdx + 1
+          charIdx++
+          skipToNextRow = true
+          continue
+        }
+
+        const w = charWidth(ch)
+        if (w === 2) {
+          const nextCol = col + 1
+          if (nextCol < grid.cols && grid.ownerAt(row, nextCol) === ownerId) {
+            col++
+            charIdx++
+          }
+        } else {
+          charIdx++
+        }
+      }
+      if (row === this.cursorRow) {
+        // 光标行结束（自动折行），charIdx 是下一行起始
+        return charIdx
+      }
+    }
+    return charIdx
+  }
+
+  /** 找到当前 scrollOffset 对应的视觉行的前一行起始 */
+  private findPrevVisualLineStart(grid: Grid, ownerId: string): number {
+    if (this.scrollOffset === 0) return 0
+    // 找到 scrollOffset 前一个字符所在行的起始
+    // 简化：找最近的 '\n' 或用 grid 宽度回退
+    const before = this.text.slice(0, this.scrollOffset)
+    const lastNl = before.lastIndexOf('\n')
+    if (lastNl >= 0 && lastNl === this.scrollOffset - 1) {
+      // scrollOffset 紧跟在 '\n' 后面，找再上一个行起始
+      const beforeNl = this.text.slice(0, lastNl)
+      const prevNl = beforeNl.lastIndexOf('\n')
+      return prevNl >= 0 ? prevNl + 1 : 0
+    }
+    if (lastNl >= 0) return lastNl + 1
+    return 0
+  }
+
+  /** 从 startOffset 开始模拟灌入，返回到达 targetCol 时经过的字符数 */
+  private visualColToCharCount(startOffset: number, targetCol: number, grid: Grid, ownerId: string): number {
+    let charIdx = startOffset
+    let colCount = 0
+    // 找第一行的 owned cols 宽度来模拟
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) !== ownerId) continue
+        if (colCount >= targetCol) return charIdx - startOffset
+        if (charIdx >= this.text.length) return charIdx - startOffset
+
+        const ch = this.text[charIdx]!
+        if (ch === '\n') return charIdx - startOffset
+
+        const w = charWidth(ch)
+        if (w === 2) {
+          const nextCol = col + 1
+          if (nextCol < grid.cols && grid.ownerAt(row, nextCol) === ownerId) {
+            col++
+            charIdx++
+            colCount += 2
+          } else {
+            colCount++
+          }
+        } else {
+          charIdx++
+          colCount++
+        }
+      }
+      return charIdx - startOffset // end of first owned row
+    }
+    return charIdx - startOffset
   }
 }
