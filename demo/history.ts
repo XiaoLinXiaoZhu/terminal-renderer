@@ -71,7 +71,8 @@ function layout() {
   }
 
   // 限制历史不超过 rows-4（保留空间给输入区域）
-  const maxHistoryRows = rows - 4
+  const minInputRows = Math.max(6, Math.floor(rows / 2))
+  const maxHistoryRows = rows - minInputRows - 1 // -1 for prompt label
   const inputStartRow = Math.min(historyRows, maxHistoryRows)
 
   // 清理 grid

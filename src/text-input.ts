@@ -186,9 +186,11 @@ export class TextInput {
     // 向下滚动：如果光标在内容中的位置使得 paint 无法将其定位在视口内
     // 策略：反复增加 scrollOffset 直到光标在视口内
     while (this.isCursorBelowViewport(grid, ownerId)) {
+      const prev = this.scrollOffset
       this.scrollOffset = this.advanceScrollOffset(grid, ownerId)
       adjusted = true
       if (this.scrollOffset >= this.text.length) break
+      if (this.scrollOffset === prev) break // safety: no progress
     }
 
     // 向上滚动：如果 cursorOffset < scrollOffset
@@ -343,18 +345,19 @@ export class TextInput {
   /** 将 scrollOffset 前进一个视觉行（到下一行起始的 charIdx） */
   private advanceScrollOffset(grid: Grid, ownerId: string): number {
     let charIdx = this.scrollOffset
-    // 找到第一行的末尾
     for (let row = 0; row < grid.rows; row++) {
       let skipToNextRow = false
+      let hadOwnedCell = false
       for (let col = 0; col < grid.cols; col++) {
         if (grid.ownerAt(row, col) !== ownerId) continue
         if (skipToNextRow) continue
+        hadOwnedCell = true
 
         if (charIdx >= this.text.length) return charIdx
 
         const ch = this.text[charIdx]!
         if (ch === '\n') {
-          return charIdx + 1 // 跳过换行符，下一行开始
+          return charIdx + 1
         }
 
         const w = charWidth(ch)
@@ -368,8 +371,8 @@ export class TextInput {
           charIdx++
         }
       }
-      // 第一行结束，返回当前 charIdx（下一行开始位置）
-      return charIdx
+      // 只有处理了 owned cells 的行才算"一行结束"
+      if (hadOwnedCell) return charIdx
     }
     return charIdx
   }
