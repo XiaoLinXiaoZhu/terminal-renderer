@@ -4,8 +4,6 @@
  * Grid 只管理底部的小输入区域（10 行）。历史通过终端自身的 scrollback 积累。
  * 提交时将内容作为普通终端输出"固化"，然后在新位置重建 Grid。
  *
- * 关键技术点：Grid.flush 使用相对光标定位，使 Grid 能在非 row-0 的终端位置渲染。
- *
  * 运行: bun demo/history.ts
  * 退出: Ctrl+C
  */
@@ -16,7 +14,6 @@ import { parseKey } from '../src/keys.ts'
 
 const stream = process.stderr
 const cols = stream.columns || 80
-const termRows = stream.rows || 24
 
 // Grid 只占底部固定行数
 const GRID_ROWS = 10
@@ -24,6 +21,9 @@ const GRID_ROWS = 10
 const grid = Grid.create(cols, GRID_ROWS)
 const ti = new TextInput()
 let promptCounter = 1
+
+// 终端光标当前在 grid 内的行位置（相对于 grid home）
+let cursorAtRow = 0
 
 // --- Styles ---
 const promptStyle = encodeStyle(3, 0, BOLD) // green bold
@@ -56,18 +56,29 @@ function setupGrid() {
   }
 }
 
+
+
+// render 使用 save/restore
 function render() {
   setupGrid()
   ti.ensureCursorVisible(grid, 'input')
   ti.paint(grid, 'input')
-  // Move to grid home: up to row 0 of grid, col 0
-  stream.write(`\x1b[${GRID_ROWS}F`) // move to beginning of line, GRID_ROWS lines up
+
+  // 从当前 cursor 位置移到 grid home
+  if (cursorAtRow > 0) stream.write(`\x1b[${cursorAtRow}A`)
+  stream.write('\r')
+  // 现在在 grid home
+
+  // Save position (at grid home), flush, restore to grid home
+  stream.write('\x1b7') // save
   grid.flush(stream)
-  // Position cursor at TextInput cursor
-  stream.write(`\x1b[${GRID_ROWS}F`) // back to grid home
+  stream.write('\x1b8') // restore to grid home
+
+  // 从 grid home 定位到 TextInput cursor
   if (ti.cursorRow > 0) stream.write(`\x1b[${ti.cursorRow}B`)
   stream.write('\r')
   if (ti.cursorCol > 0) stream.write(`\x1b[${ti.cursorCol}C`)
+  cursorAtRow = ti.cursorRow
 }
 
 // --- Submit ---
@@ -75,15 +86,17 @@ function render() {
 function submit() {
   if (ti.text.trim().length === 0) return
 
-  // 1. 清除 Grid 区域
-  stream.write(`\x1b[${GRID_ROWS}F`) // 移动到 grid 顶部
-  stream.write('\x1b[J') // 清除到屏幕底部（当前光标在 grid 区域）
+  // 从当前位置移到 grid home
+  if (cursorAtRow > 0) stream.write(`\x1b[${cursorAtRow}A`)
+  stream.write('\r')
 
-  // 2. 输出固化内容（带样式）
+  // 清除 grid 区域
+  stream.write('\x1b[J')
+
+  // 输出固化内容（带样式）
   const prompt = `[${promptCounter}]> `
   stream.write(sgrFromEncoded(promptStyle) + prompt + '\x1b[0m')
 
-  // 输出文本内容（处理换行：每行带缩进）
   const lines = ti.text.split('\n')
   stream.write(lines[0]!)
   for (let i = 1; i < lines.length; i++) {
@@ -91,38 +104,30 @@ function submit() {
   }
   stream.write('\n')
 
-  // 3. 分隔线
+  // 分隔线
   stream.write(sgrFromEncoded(dimStyle) + '─'.repeat(Math.min(40, cols)) + '\x1b[0m\n')
 
-  // 4. 计算输出占了多少行
-  let outputLines = 1 // prompt + first line
-  for (let i = 1; i < lines.length; i++) outputLines++
-  outputLines++ // separator
-
-  // 5. 重置输入状态
+  // 重置输入状态
   promptCounter++
   ti.text = ''
   ti.cursorOffset = 0
   ti.scrollOffset = 0
 
-  // 6. 为新 Grid 腾出空间
-  //    当前光标在固化输出之后。如果距离终端底部不够 GRID_ROWS 行，需要滚动。
-  //    策略：输出 GRID_ROWS 个换行来确保空间，然后回退
+  // 为新 Grid 腾出空间（GRID_ROWS 个换行确保空间）
   for (let i = 0; i < GRID_ROWS; i++) stream.write('\n')
   stream.write(`\x1b[${GRID_ROWS}A`)
 
-  // 7. Grid 固定在底部，当前位置已是 grid 顶部，直接重建并渲染
-  // 8. 重建并渲染
+  // 现在 cursor 在新 grid 的 home 位置
+  cursorAtRow = 0
   grid.resize(cols, GRID_ROWS)
   render()
 }
 
 // --- Init ---
 
-// 隐藏光标，滚动到底部确保有空间
 stream.write('\x1b[?25l')
 
-// 输出欢迎信息
+// 欢迎信息
 stream.write(sgrFromEncoded(dimStyle) + '── history demo ──\x1b[0m\n')
 stream.write(sgrFromEncoded(dimStyle) + '输入文本后按 Ctrl+D 提交 | Ctrl+C 退出\x1b[0m\n')
 stream.write(sgrFromEncoded(dimStyle) + '─'.repeat(Math.min(40, cols)) + '\x1b[0m\n')
@@ -131,7 +136,8 @@ stream.write(sgrFromEncoded(dimStyle) + '─'.repeat(Math.min(40, cols)) + '\x1b
 for (let i = 0; i < GRID_ROWS; i++) stream.write('\n')
 stream.write(`\x1b[${GRID_ROWS}A`)
 
-// Grid 起始于终端底部（render 中通过 GRID_ROWS 定位）
+// 现在 cursor 在 grid home
+cursorAtRow = 0
 render()
 stream.write('\x1b[?25h')
 
@@ -148,9 +154,10 @@ process.stdin.on('data', (buf: Buffer) => {
   switch (key.type) {
     case 'ctrl':
       if (key.key === 'c') {
-        // Move to row below grid area before exiting
-        stream.write(`\x1b[${GRID_ROWS}B\n`)
-        stream.write('\x1b[?25h\x1b[0m\n')
+        // 移到 grid 底部下方退出
+        const downNeeded = GRID_ROWS - 1 - cursorAtRow
+        if (downNeeded > 0) stream.write(`\x1b[${downNeeded}B`)
+        stream.write('\n\x1b[?25h\x1b[0m')
         process.exit(0)
       }
       if (key.key === 'd') {
