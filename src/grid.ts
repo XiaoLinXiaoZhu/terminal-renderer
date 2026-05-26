@@ -193,6 +193,55 @@ export class Grid {
     }
   }
 
+  // --- Resize ---
+
+  /**
+   * 重建 Grid 为新尺寸。重置所有内容为空格、dirty 全部标记为 true。
+   */
+  resize(cols: number, rows: number): void {
+    (this as { cols: number }).cols = cols;
+    (this as { rows: number }).rows = rows;
+    this.chars = Array.from({ length: rows }, () => Array<string>(cols).fill(' '))
+    this.styles = Array.from({ length: rows }, () => Array<number>(cols).fill(0))
+    this.owners = Array.from({ length: rows }, () => Array<string>(cols).fill(''))
+    this.flags = Array.from({ length: rows }, () => Array<number>(cols).fill(0))
+    this.dirty = Array.from({ length: rows }, () => Array<boolean>(cols).fill(true))
+  }
+
+  /**
+   * 计算当前 Grid 内容在 newCols 宽度下会占多少行（预测终端 reflow）。
+   * 基于每行实际内容宽度（非尾部空格）进行估算。
+   */
+  computeReflowHeight(newCols: number): number {
+    let totalRows = 0
+    for (let row = 0; row < this.rows; row++) {
+      // 找到该行实际内容的最后一列（非空格）
+      let contentWidth = 0
+      for (let col = this.cols - 1; col >= 0; col--) {
+        if (this.chars[row]![col] !== ' ' || (this.flags[row]![col]! & IS_CONTINUATION)) {
+          contentWidth = col + 1
+          break
+        }
+      }
+      // 空行至少占 1 行
+      totalRows += Math.max(1, Math.ceil(contentWidth / newCols))
+    }
+    return totalRows
+  }
+
+  /**
+   * 清除终端上的旧内容（基于 reflow 后的行数）。
+   */
+  clearFromTerminal(stream: { write(s: string): void }, reflowedHeight: number): void {
+    // 移动到第一行，逐行清除
+    stream.write(`\x1b[${reflowedHeight}A`) // 上移
+    for (let i = 0; i < reflowedHeight; i++) {
+      stream.write('\x1b[2K') // 清除当前行
+      if (i < reflowedHeight - 1) stream.write('\x1b[B') // 下移
+    }
+    stream.write(`\x1b[${reflowedHeight - 1}A`) // 回到顶部
+  }
+
   // --- 内部 ---
 
   /** 找到 continuation cell 对应的主 cell 并清理它 */
