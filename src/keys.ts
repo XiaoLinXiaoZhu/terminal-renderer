@@ -12,6 +12,7 @@ export type KeyAction =
   | { type: 'down' }
   | { type: 'enter' }
   | { type: 'escape' }
+  | { type: 'tab' }
   | { type: 'ctrl'; key: string }
   | { type: 'unknown'; raw: Buffer }
 
@@ -25,6 +26,7 @@ export function parseKey(buf: Buffer): KeyAction {
       if (code === 4) return { type: 'ctrl', key: 'd' }
       if (code === 13) return { type: 'enter' }
       if (code === 27) return { type: 'escape' }
+      if (code === 9) return { type: 'tab' }
       return { type: 'ctrl', key: String.fromCharCode(code + 96) }
     }
   }
