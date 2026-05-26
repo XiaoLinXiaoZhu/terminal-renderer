@@ -270,18 +270,21 @@ function paintMenuWithBorder() {
     const chars = [...item]
 
     // 填充内部区域
+    let charIdx = 0
     for (let c = leftCol + 1; c < rightCol; c++) {
-      const idx = c - leftCol - 1
-      if (idx < chars.length) {
-        const ch = chars[idx]!
+      if (charIdx < chars.length) {
+        const ch = chars[charIdx]!
         const w = charWidth(ch)
         if (w === 2 && c + 1 < rightCol) {
           grid.setWideChar(row, c, ch, style)
           c++ // skip continuation
+          charIdx++
         } else if (w === 2) {
           grid.setChar(row, c, ' ', style) // 放不下
+          // 不递增 charIdx，下一列再试
         } else {
           grid.setChar(row, c, ch, style)
+          charIdx++
         }
       } else {
         grid.setChar(row, c, ' ', style)
