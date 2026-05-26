@@ -159,7 +159,7 @@ export class Grid {
 
   // --- 上屏 ---
 
-  flush(stream: { write(s: string): void }): void {
+  flush(stream: { write(s: string): void }, rowOffset: number = 0): void {
     let lastRow = -1
     let lastCol = -1
     let currentStyle = -1 // impossible initial value to force first SGR
@@ -174,7 +174,7 @@ export class Grid {
 
         // 移动光标
         if (row !== lastRow || col !== lastCol + 1) {
-          stream.write(`\x1b[${row + 1};${col + 1}H`)
+          stream.write(`\x1b[${row + 1 + rowOffset};${col + 1}H`)
         }
 
         // 设置样式
