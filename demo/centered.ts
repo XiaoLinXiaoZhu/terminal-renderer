@@ -271,4 +271,4 @@ process.stderr.on('resize', debounce(() => {
   cols = process.stderr.columns || 80
   vp.remount(cols, GRID_ROWS)
   render()
-}, 16))
+}, 300))

@@ -96,9 +96,9 @@ export class Viewport {
     // 计算旧内容在新宽度下的 reflow 行数
     const reflowedHeight = this.grid.computeReflowHeight(newCols)
 
-    // 上移足够多行以到达 reflow 后内容的顶部
-    // 即使 reflowedHeight > 实际位置也安全（终端会 clamp 到 row 0）
-    const moveUp = Math.max(reflowedHeight, this.cursorRow + 1)
+    // 终端 reflow 时所有行的额外折叠行都会推动光标下移
+    // moveUp = 原 cursorRow + 全部行的额外 reflow 行数
+    const moveUp = this.cursorRow + (reflowedHeight - this.grid.rows)
     if (moveUp > 0) {
       this.stream.write(`\x1b[${moveUp}A`)
     }
