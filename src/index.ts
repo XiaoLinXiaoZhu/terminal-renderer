@@ -2,4 +2,5 @@ export { Grid, IS_CONTINUATION, encodeStyle, sgrFromEncoded, BOLD, DIM, ITALIC, 
 export { charWidth } from './width.ts'
 export { TextInput } from './text-input.ts'
 export { parseKey } from './keys.ts'
+export { Menu } from './menu.ts'
 export type { KeyAction } from './keys.ts'
