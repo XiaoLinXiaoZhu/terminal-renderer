@@ -176,8 +176,10 @@ describe('Grid — Step 0.3: flush 上屏', () => {
     const output: string[] = []
     grid.flush({ write: (s) => output.push(s) })
     const result = output.join('')
-    // 移动到 (2, 3) → \x1b[3;4H (1-based)
-    expect(result).toContain('\x1b[3;4H')
+    // 相对移动：下 2 行 + 回车 + 右 3 列
+    expect(result).toContain('\x1b[2B')
+    expect(result).toContain('\r')
+    expect(result).toContain('\x1b[3C')
     // style=0 → reset
     expect(result).toContain('\x1b[0m')
     // 字符
@@ -192,9 +194,9 @@ describe('Grid — Step 0.3: flush 上屏', () => {
     const output: string[] = []
     grid.flush({ write: (s) => output.push(s) })
     const result = output.join('')
-    // 只应有一次 cursor move
-    const moveCount = (result.match(/\x1b\[\d+;\d+H/g) || []).length
-    expect(moveCount).toBe(1)
+    // 只应有一次垂直移动（到 row 1）
+    const vertMoveCount = (result.match(/\x1b\[\d+B/g) || []).length
+    expect(vertMoveCount).toBe(1)
     expect(result).toContain('A')
     expect(result).toContain('B')
     expect(result).toContain('C')

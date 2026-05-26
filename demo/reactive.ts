@@ -136,6 +136,7 @@ effect(() => {
   writeStr(rows - 1, 2, 'Ctrl+C 退出 | 所有动画由 @vue/reactivity watchEffect 驱动', labelStyle)
 
   // Flush
+  stream.write('\x1b[H')
   grid.flush(stream)
 })
 

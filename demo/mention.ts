@@ -47,6 +47,7 @@ function render() {
   if (menuOpen) {
     menu.paint(grid, 'menu')
   }
+  stream.write('\x1b[H')
   grid.flush(stream)
   stream.write(`\x1b[${ti.cursorRow + 1};${ti.cursorCol + 1}H`)
 }

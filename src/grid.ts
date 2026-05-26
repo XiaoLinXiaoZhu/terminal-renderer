@@ -159,10 +159,11 @@ export class Grid {
 
   // --- 上屏 ---
 
-  flush(stream: { write(s: string): void }, rowOffset: number = 0): void {
-    let lastRow = -1
-    let lastCol = -1
-    let currentStyle = -1 // impossible initial value to force first SGR
+  flush(stream: { write(s: string): void }): void {
+    // 调用者必须在调用前将终端光标定位到 Grid 的 home（左上角）
+    let curRow = 0
+    let curCol = 0
+    let currentStyle = -1
 
     for (let row = 0; row < this.rows; row++) {
       for (let col = 0; col < this.cols; col++) {
@@ -172,9 +173,16 @@ export class Grid {
           continue
         }
 
-        // 移动光标
-        if (row !== lastRow || col !== lastCol + 1) {
-          stream.write(`\x1b[${row + 1 + rowOffset};${col + 1}H`)
+        // 移动光标到 (row, col)
+        if (row !== curRow || col !== curCol) {
+          // 垂直移动
+          if (row > curRow) stream.write(`\x1b[${row - curRow}B`)
+          else if (row < curRow) stream.write(`\x1b[${curRow - row}A`)
+          // 水平定位：回到行首再右移
+          stream.write(`\r`)
+          if (col > 0) stream.write(`\x1b[${col}C`)
+          curRow = row
+          curCol = col
         }
 
         // 设置样式
@@ -185,8 +193,11 @@ export class Grid {
 
         // 写入字符
         stream.write(this.chars[row]![col]!)
-        lastRow = row
-        lastCol = col
+        curCol++
+        // 宽字符会让终端光标前进 2 列
+        if (col + 1 < this.cols && (this.flags[row]![col + 1]! & IS_CONTINUATION)) {
+          curCol++
+        }
 
         this.dirty[row]![col] = false
       }

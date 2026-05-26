@@ -21,6 +21,7 @@ const ti = new TextInput()
 
 function render() {
   ti.paint(grid, 'input')
+  stream.write('\x1b[H')
   grid.flush(stream)
   // 移动终端真实光标到 TextInput 光标位置
   stream.write(`\x1b[${ti.cursorRow + 1};${ti.cursorCol + 1}H`)

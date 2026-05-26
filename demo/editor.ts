@@ -23,6 +23,7 @@ ti.text = '欢迎使用 terminal-renderer 多行编辑器！\n\n按键说明：\
 function render() {
   ti.ensureCursorVisible(grid, 'input')
   ti.paint(grid, 'input')
+  stream.write('\x1b[H')
   grid.flush(stream)
   stream.write(`\x1b[${ti.cursorRow + 1};${ti.cursorCol + 1}H`)
 }

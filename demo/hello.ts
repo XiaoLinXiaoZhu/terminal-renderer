@@ -76,6 +76,7 @@ if (cols > 20) {
 }
 
 // flush 上屏
+process.stderr.write('\x1b[H')
 grid.flush(process.stderr)
 
 // 光标移到底部，避免 shell prompt 覆盖输出

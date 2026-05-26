@@ -4,7 +4,7 @@
  * Grid 只管理底部的小输入区域（10 行）。历史通过终端自身的 scrollback 积累。
  * 提交时将内容作为普通终端输出"固化"，然后在新位置重建 Grid。
  *
- * 关键技术点：Grid.flush 的 rowOffset 参数，使 Grid 能在非 row-0 的终端位置渲染。
+ * 关键技术点：Grid.flush 使用相对光标定位，使 Grid 能在非 row-0 的终端位置渲染。
  *
  * 运行: bun demo/history.ts
  * 退出: Ctrl+C
@@ -24,10 +24,6 @@ const GRID_ROWS = 10
 const grid = Grid.create(cols, GRID_ROWS)
 const ti = new TextInput()
 let promptCounter = 1
-
-// Grid 在终端中的起始行（0-based terminal row）
-// 用 DSR (Device Status Report) 太复杂，这里通过跟踪输出行数来计算
-let gridTermRow = 0 // 会在 init 时设置
 
 // --- Styles ---
 const promptStyle = encodeStyle(3, 0, BOLD) // green bold
@@ -64,9 +60,14 @@ function render() {
   setupGrid()
   ti.ensureCursorVisible(grid, 'input')
   ti.paint(grid, 'input')
-  grid.flush(stream, gridTermRow)
-  // 移动终端光标到 TextInput 光标位置
-  stream.write(`\x1b[${ti.cursorRow + 1 + gridTermRow};${ti.cursorCol + 1}H`)
+  // Move to grid home: up to row 0 of grid, col 0
+  stream.write(`\x1b[${GRID_ROWS}F`) // move to beginning of line, GRID_ROWS lines up
+  grid.flush(stream)
+  // Position cursor at TextInput cursor
+  stream.write(`\x1b[${GRID_ROWS}F`) // back to grid home
+  if (ti.cursorRow > 0) stream.write(`\x1b[${ti.cursorRow}B`)
+  stream.write('\r')
+  if (ti.cursorCol > 0) stream.write(`\x1b[${ti.cursorCol}C`)
 }
 
 // --- Submit ---
@@ -74,9 +75,9 @@ function render() {
 function submit() {
   if (ti.text.trim().length === 0) return
 
-  // 1. 移动到 Grid 起始位置并清除 Grid 区域
-  stream.write(`\x1b[${gridTermRow + 1};1H`) // 移到 grid 起始行
-  stream.write('\x1b[J') // 清除到屏幕底部
+  // 1. 清除 Grid 区域
+  stream.write(`\x1b[${GRID_ROWS}F`) // 移动到 grid 顶部
+  stream.write('\x1b[J') // 清除到屏幕底部（当前光标在 grid 区域）
 
   // 2. 输出固化内容（带样式）
   const prompt = `[${promptCounter}]> `
@@ -110,11 +111,7 @@ function submit() {
   for (let i = 0; i < GRID_ROWS; i++) stream.write('\n')
   stream.write(`\x1b[${GRID_ROWS}A`)
 
-  // 7. 新的 Grid 起始位置 = 终端行数 - GRID_ROWS（滚动后固定在底部）
-  //    由于我们刚输出了 GRID_ROWS 个换行并回退，当前位置就是新 grid 顶部
-  //    使用 CSI 6n 太复杂，简化：假设当前位置是 termRows - GRID_ROWS
-  gridTermRow = termRows - GRID_ROWS
-
+  // 7. Grid 固定在底部，当前位置已是 grid 顶部，直接重建并渲染
   // 8. 重建并渲染
   grid.resize(cols, GRID_ROWS)
   render()
@@ -134,9 +131,7 @@ stream.write(sgrFromEncoded(dimStyle) + '─'.repeat(Math.min(40, cols)) + '\x1b
 for (let i = 0; i < GRID_ROWS; i++) stream.write('\n')
 stream.write(`\x1b[${GRID_ROWS}A`)
 
-// Grid 起始于终端底部
-gridTermRow = termRows - GRID_ROWS
-
+// Grid 起始于终端底部（render 中通过 GRID_ROWS 定位）
 render()
 stream.write('\x1b[?25h')
 
@@ -153,7 +148,8 @@ process.stdin.on('data', (buf: Buffer) => {
   switch (key.type) {
     case 'ctrl':
       if (key.key === 'c') {
-        stream.write(`\x1b[${gridTermRow + GRID_ROWS + 1};1H`)
+        // Move to row below grid area before exiting
+        stream.write(`\x1b[${GRID_ROWS}B\n`)
         stream.write('\x1b[?25h\x1b[0m\n')
         process.exit(0)
       }
