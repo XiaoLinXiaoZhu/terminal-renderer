@@ -1,8 +1,38 @@
 {
-  "name": "terminal-renderer",
-  "module": "src/index.ts",
+  "name": "@xlxz/terminal-renderer",
+  "version": "0.1.0",
+  "description": "Virtual terminal buffer with Grid, Viewport, TextInput, Menu and key parsing utilities",
   "type": "module",
-  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "demo",
+    "docs"
+  ],
+  "scripts": {
+    "build": "bun run build.ts",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "terminal",
+    "renderer",
+    "tui",
+    "grid",
+    "viewport",
+    "text-input",
+    "ansi"
+  ],
+  "license": "MIT",
   "devDependencies": {
     "@types/bun": "latest"
   },

@@ -1,4 +1,5 @@
 node_modules/
+dist/
 # n0n ai 日志
 .temp/
 _n0n_*
