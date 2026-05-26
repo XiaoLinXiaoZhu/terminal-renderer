@@ -533,6 +533,96 @@ describe('TextInput — Step 2.2: 垂直光标移动', () => {
     expect(ti.cursorRow).toBe(0)
     expect(ti.cursorCol).toBe(4)
   })
+
+  test('空行导航：从短行上移经过空行回到长行', () => {
+    const grid = Grid.create(10, 5)
+    grid.setOwnerAll('input')
+    const ti = new TextInput()
+    ti.text = '1231123\n\n123'
+    // Start at end of "123" (last line), col 3
+    ti.cursorOffset = 12 // text.length = 12, this is at end
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(2)
+    expect(ti.cursorCol).toBe(3)
+
+    // Up to empty line
+    ti.moveUp(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(1)
+    expect(ti.cursorCol).toBe(0)
+    expect(ti.stickyCol).toBe(3)
+
+    // Up to first line - should go to col 3
+    ti.moveUp(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(0)
+    expect(ti.cursorCol).toBe(3)
+  })
+
+  test('空行导航：连续多个空行', () => {
+    const grid = Grid.create(10, 6)
+    grid.setOwnerAll('input')
+    const ti = new TextInput()
+    ti.text = 'ABCDE\n\n\nXYZ'
+    ti.cursorOffset = 3 // col 3 on first line
+    ti.paint(grid, 'input')
+    expect(ti.cursorCol).toBe(3)
+
+    // Down through first empty line
+    ti.moveDown(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(1)
+    expect(ti.cursorCol).toBe(0)
+
+    // Down through second empty line
+    ti.moveDown(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(2)
+    expect(ti.cursorCol).toBe(0)
+
+    // Down to "XYZ"
+    ti.moveDown(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(3)
+    expect(ti.cursorCol).toBe(3) // stickyCol=3, "XYZ" has 3 chars → end
+    expect(ti.stickyCol).toBe(3)
+
+    // Up back through all empty lines to first line
+    ti.moveUp(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(2)
+
+    ti.moveUp(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(1)
+
+    ti.moveUp(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(0)
+    expect(ti.cursorCol).toBe(3) // restored
+  })
+
+  test('空行导航：文本末尾的空行', () => {
+    const grid = Grid.create(10, 4)
+    grid.setOwnerAll('input')
+    const ti = new TextInput()
+    ti.text = 'Hello\n'
+    ti.cursorOffset = 3 // col 3 on "Hello"
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(0)
+
+    // Down to the empty line after \n
+    ti.moveDown(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(1)
+    expect(ti.cursorCol).toBe(0)
+
+    // Up back
+    ti.moveUp(grid, 'input')
+    ti.paint(grid, 'input')
+    expect(ti.cursorRow).toBe(0)
+    expect(ti.cursorCol).toBe(3)
+  })
 })
 
 describe('TextInput — Step 2.3: 滚动', () => {
