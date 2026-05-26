@@ -86,22 +86,32 @@ export class Viewport {
   }
 
   /**
-   * resize 后重新挂载。
-   * 调用者应先调用 grid.resize(newCols, newRows) 更新 grid 尺寸。
+   * resize 后重新挂载。内部处理 reflow 清除 + grid resize + 重新预留空间。
+   * 必须在 grid.resize() 之前调用（需要旧内容计算 reflow）。
    *
-   * @param oldRows 旧的 grid 行数（用于计算需要清除的区域）
+   * @param newCols 新的终端列数
+   * @param newRows 新的 grid 行数（省略则保持当前行数）
    */
-  remount(oldRows?: number): void {
-    // 用旧行数清除区域（如果提供），否则用当前 grid 行数
-    const clearRows = oldRows ?? this.grid.rows
-    // 移到 grid home
-    if (this.cursorRow > 0) {
-      this.stream.write(`\x1b[${this.cursorRow}A`)
+  remount(newCols: number, newRows?: number): void {
+    // 计算旧内容在新宽度下的 reflow 行数
+    const reflowedHeight = this.grid.computeReflowHeight(newCols)
+
+    // 上移足够多行以到达 reflow 后内容的顶部
+    // 即使 reflowedHeight > 实际位置也安全（终端会 clamp 到 row 0）
+    const moveUp = Math.max(reflowedHeight, this.cursorRow + 1)
+    if (moveUp > 0) {
+      this.stream.write(`\x1b[${moveUp}A`)
     }
     this.stream.write('\r')
-    // 清除旧区域
+
+    // 清除从光标到屏幕底部的所有内容
     this.stream.write('\x1b[J')
     this.cursorRow = 0
+
+    // resize grid
+    const rows = newRows ?? this.grid.rows
+    this.grid.resize(newCols, rows)
+
     // 重新预留空间
     this.mount()
   }
@@ -138,4 +148,18 @@ export class Viewport {
       this.stream.write(`\x1b[${to.col}C`)
     }
   }
+}
+
+// --- 工具函数 ---
+
+/**
+ * 创建一个 debounced 版本的函数。在最后一次调用后等待 ms 毫秒才执行。
+ * 适用于 resize 事件防抖。
+ */
+export function debounce<T extends (...args: any[]) => void>(fn: T, ms: number): T {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return ((...args: any[]) => {
+    if (timer !== null) clearTimeout(timer)
+    timer = setTimeout(() => { timer = null; fn(...args) }, ms)
+  }) as unknown as T
 }

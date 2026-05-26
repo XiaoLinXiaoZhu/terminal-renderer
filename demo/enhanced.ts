@@ -457,8 +457,6 @@ process.stdin.on('data', (buf: Buffer) => {
 
 process.stderr.on('resize', () => {
   const newCols = process.stderr.columns || 80
-  const oldRows = grid.rows
-  grid.resize(newCols, GRID_ROWS)
-  vp.remount(oldRows)
+  vp.remount(newCols, GRID_ROWS)
   render()
 })

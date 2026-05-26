@@ -112,9 +112,7 @@ process.stdin.on('data', (buf: Buffer) => {
 process.stderr.on('resize', () => {
   cols = process.stderr.columns || 80
   rows = process.stderr.rows || 24
-  const oldRows = grid.rows
-  grid.resize(cols, rows)
+  vp.remount(cols, rows)
   grid.setOwnerAll('input')
-  vp.remount(oldRows)
   render()
 })

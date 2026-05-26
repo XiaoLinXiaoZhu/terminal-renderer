@@ -179,8 +179,6 @@ process.stdin.on('data', (buf: Buffer) => {
 process.stderr.on('resize', () => {
   const newCols = process.stderr.columns || 80
   const newRows = process.stderr.rows || 24
-  const oldRows = grid.rows
-  grid.resize(newCols, newRows)
+  vp.remount(newCols, newRows)
   grid.setOwnerAll('display')
-  vp.remount(oldRows)
 })

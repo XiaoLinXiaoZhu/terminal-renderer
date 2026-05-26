@@ -10,7 +10,7 @@
 
 import { Grid, encodeStyle, sgrFromEncoded, BOLD, DIM } from '../src/grid.ts'
 import { TextInput } from '../src/text-input.ts'
-import { Viewport } from '../src/viewport.ts'
+import { Viewport, debounce } from '../src/viewport.ts'
 import { parseKey } from '../src/keys.ts'
 import { charWidth } from '../src/width.ts'
 
@@ -267,10 +267,8 @@ process.stdin.on('data', (buf: Buffer) => {
 
 // --- Resize ---
 
-process.stderr.on('resize', () => {
+process.stderr.on('resize', debounce(() => {
   cols = process.stderr.columns || 80
-  const oldRows = grid.rows
-  grid.resize(cols, GRID_ROWS)
-  vp.remount(oldRows)
+  vp.remount(cols, GRID_ROWS)
   render()
-})
+}, 16))
