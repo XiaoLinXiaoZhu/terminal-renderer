@@ -1,7 +1,8 @@
 /**
  * TextInput — 多行文本输入 Widget
  *
- * 将文本灌入 Grid 中属于自己的格子。支持自动折行、CJK 宽字符、光标定位。
+ * 将文本灌入 Grid 中属于自己的格子。支持自动折行、CJK 宽字符、
+ * 换行符、光标定位、垂直导航、滚动。
  */
 
 import { Grid } from './grid.ts'
@@ -20,10 +21,17 @@ export class TextInput {
   paint(grid: Grid, ownerId: string): void {
     let charIdx = this.scrollOffset
     let cursorPlaced = false
+    let skipToNextRow = false
 
     for (let row = 0; row < grid.rows; row++) {
+      skipToNextRow = false
       for (let col = 0; col < grid.cols; col++) {
         if (grid.ownerAt(row, col) !== ownerId) continue
+
+        if (skipToNextRow) {
+          grid.setChar(row, col, ' ', 0)
+          continue
+        }
 
         // 记录光标位置
         if (!cursorPlaced && charIdx === this.cursorOffset) {
@@ -35,6 +43,15 @@ export class TextInput {
         // 写入字符
         if (charIdx < this.text.length) {
           const ch = this.text[charIdx]!
+
+          // 换行符：填充当前行剩余空格，跳到下一行
+          if (ch === '\n') {
+            grid.setChar(row, col, ' ', 0)
+            charIdx++
+            skipToNextRow = true
+            continue
+          }
+
           const w = charWidth(ch)
 
           if (w === 2) {
@@ -61,14 +78,11 @@ export class TextInput {
 
     // 光标在文本末尾且未在遍历中定位到（文本刚好填满所有格子）
     if (!cursorPlaced) {
-      // 光标定位到最后一个 owned cell 之后（视觉上停在最后一个位置）
-      // 向后找最后一个 owned cell
       for (let row = grid.rows - 1; row >= 0; row--) {
         for (let col = grid.cols - 1; col >= 0; col--) {
           if (grid.ownerAt(row, col) === ownerId) {
             this.cursorRow = row
             this.cursorCol = col
-            cursorPlaced = true
             return
           }
         }
@@ -86,7 +100,6 @@ export class TextInput {
 
   deleteBeforeCursor(): void {
     if (this.cursorOffset === 0) return
-    // 处理可能的多字节字符：取 cursorOffset 前一个字符
     const before = [...this.text.slice(0, this.cursorOffset)]
     before.pop()
     const newBefore = before.join('')
@@ -97,7 +110,6 @@ export class TextInput {
 
   moveLeft(): void {
     if (this.cursorOffset <= 0) return
-    // 后退一个字符（处理多字节）
     const before = [...this.text.slice(0, this.cursorOffset)]
     before.pop()
     this.cursorOffset = before.join('').length
@@ -106,10 +118,243 @@ export class TextInput {
 
   moveRight(): void {
     if (this.cursorOffset >= this.text.length) return
-    // 前进一个字符（处理多字节）
     const remaining = [...this.text.slice(this.cursorOffset)]
     const nextChar = remaining[0]!
     this.cursorOffset += nextChar.length
     this.stickyCol = null
+  }
+
+  // --- 垂直导航 ---
+
+  moveUp(grid: Grid, ownerId: string): void {
+    const targetRow = this.cursorRow - 1
+    if (targetRow < 0) return
+
+    const targetCol = this.stickyCol ?? this.cursorCol
+    if (this.stickyCol === null) this.stickyCol = this.cursorCol
+
+    this.cursorOffset = this.resolveCharIndex(grid, ownerId, targetRow, targetCol)
+  }
+
+  moveDown(grid: Grid, ownerId: string): void {
+    const targetRow = this.cursorRow + 1
+    if (targetRow >= grid.rows) return
+
+    const targetCol = this.stickyCol ?? this.cursorCol
+    if (this.stickyCol === null) this.stickyCol = this.cursorCol
+
+    this.cursorOffset = this.resolveCharIndex(grid, ownerId, targetRow, targetCol)
+  }
+
+  // --- 滚动 ---
+
+  /**
+   * 确保光标在视口内。如果光标超出当前可见区域则调整 scrollOffset。
+   * 需要在编辑/移动后、paint 前调用。
+   * 返回是否发生了调整。
+   */
+  ensureCursorVisible(grid: Grid, ownerId: string): boolean {
+    // 计算 owned 行数（视口高度）
+    const ownedRows = this.getOwnedRowCount(grid, ownerId)
+    if (ownedRows === 0) return false
+
+    // 先用当前 scrollOffset paint 一次来确定光标位置
+    this.paint(grid, ownerId)
+
+    // 检查光标是否超出底部（cursorOffset 在 paint 结束时仍未被放置说明在视口外）
+    // 更精确的方法：模拟遍历计算光标所在的"逻辑行"
+
+    let adjusted = false
+
+    // 向下滚动：如果光标在内容中的位置使得 paint 无法将其定位在视口内
+    // 策略：反复增加 scrollOffset 直到光标在视口内
+    while (this.isCursorBelowViewport(grid, ownerId)) {
+      this.scrollOffset = this.advanceScrollOffset(grid, ownerId)
+      adjusted = true
+      if (this.scrollOffset >= this.text.length) break
+    }
+
+    // 向上滚动：如果 cursorOffset < scrollOffset
+    if (this.cursorOffset < this.scrollOffset) {
+      this.scrollOffset = this.findLineStart(this.cursorOffset)
+      adjusted = true
+    }
+
+    return adjusted
+  }
+
+  // --- 内部辅助 ---
+
+  /**
+   * 从 (targetRow, targetCol) 反查 charIndex。
+   * 重新模拟 paint 遍历来定位。
+   */
+  private resolveCharIndex(grid: Grid, ownerId: string, targetRow: number, targetCol: number): number {
+    let charIdx = this.scrollOffset
+    let lastCharIdxOnTargetRow = -1
+    let firstCharIdxOnTargetRow = -1
+
+    for (let row = 0; row < grid.rows; row++) {
+      let skipToNextRow = false
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) !== ownerId) continue
+        if (skipToNextRow) continue
+
+        if (charIdx >= this.text.length) {
+          // 文本已结束
+          if (row === targetRow && col >= targetCol) return charIdx
+          if (row > targetRow) {
+            return lastCharIdxOnTargetRow >= 0 ? lastCharIdxOnTargetRow : charIdx
+          }
+          continue
+        }
+
+        if (row === targetRow) {
+          if (firstCharIdxOnTargetRow < 0) firstCharIdxOnTargetRow = charIdx
+          if (col >= targetCol) return charIdx
+        }
+
+        if (row > targetRow) {
+          // 已过目标行
+          if (lastCharIdxOnTargetRow >= 0) {
+            // 返回目标行最后一个 charIdx 后一位（即该行尾部）
+            return this.advanceOneChar(lastCharIdxOnTargetRow)
+          }
+          return charIdx
+        }
+
+        const ch = this.text[charIdx]!
+        if (ch === '\n') {
+          if (row === targetRow && col >= targetCol) return charIdx
+          charIdx++
+          skipToNextRow = true
+          continue
+        }
+
+        const w = charWidth(ch)
+        if (w === 2) {
+          const nextCol = col + 1
+          if (nextCol < grid.cols && grid.ownerAt(row, nextCol) === ownerId) {
+            if (row === targetRow) lastCharIdxOnTargetRow = charIdx
+            col++
+            charIdx++
+          } else {
+            // CJK 放不下，不递增 charIdx
+          }
+        } else {
+          if (row === targetRow) lastCharIdxOnTargetRow = charIdx
+          charIdx++
+        }
+      }
+    }
+
+    // 如果目标行有内容
+    if (lastCharIdxOnTargetRow >= 0) {
+      return this.advanceOneChar(lastCharIdxOnTargetRow)
+    }
+    return charIdx
+  }
+
+  /** 前进一个字符的 offset */
+  private advanceOneChar(offset: number): number {
+    if (offset >= this.text.length) return offset
+    const remaining = [...this.text.slice(offset)]
+    if (remaining.length === 0) return offset
+    return offset + remaining[0]!.length
+  }
+
+  /** 获取 owned 行数 */
+  private getOwnedRowCount(grid: Grid, ownerId: string): number {
+    let count = 0
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) === ownerId) {
+          count++
+          break
+        }
+      }
+    }
+    return count
+  }
+
+  /** 判断光标是否在视口底部之下 */
+  private isCursorBelowViewport(grid: Grid, ownerId: string): boolean {
+    // 模拟 paint 看 cursorOffset 是否在可渲染范围内
+    let charIdx = this.scrollOffset
+    for (let row = 0; row < grid.rows; row++) {
+      let skipToNextRow = false
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) !== ownerId) continue
+        if (skipToNextRow) continue
+
+        if (charIdx === this.cursorOffset) return false // 光标在视口内
+
+        if (charIdx >= this.text.length) return false // 文本已结束，光标也在视口内
+
+        const ch = this.text[charIdx]!
+        if (ch === '\n') {
+          charIdx++
+          skipToNextRow = true
+          continue
+        }
+
+        const w = charWidth(ch)
+        if (w === 2) {
+          const nextCol = col + 1
+          if (nextCol < grid.cols && grid.ownerAt(row, nextCol) === ownerId) {
+            col++
+            charIdx++
+          }
+          // 放不下的情况不递增
+        } else {
+          charIdx++
+        }
+      }
+    }
+    // 遍历完所有视口格子都没找到光标 → 光标在视口下方
+    return true
+  }
+
+  /** 将 scrollOffset 前进一个视觉行（到下一行起始的 charIdx） */
+  private advanceScrollOffset(grid: Grid, ownerId: string): number {
+    let charIdx = this.scrollOffset
+    // 找到第一行的末尾
+    for (let row = 0; row < grid.rows; row++) {
+      let skipToNextRow = false
+      for (let col = 0; col < grid.cols; col++) {
+        if (grid.ownerAt(row, col) !== ownerId) continue
+        if (skipToNextRow) continue
+
+        if (charIdx >= this.text.length) return charIdx
+
+        const ch = this.text[charIdx]!
+        if (ch === '\n') {
+          return charIdx + 1 // 跳过换行符，下一行开始
+        }
+
+        const w = charWidth(ch)
+        if (w === 2) {
+          const nextCol = col + 1
+          if (nextCol < grid.cols && grid.ownerAt(row, nextCol) === ownerId) {
+            col++
+            charIdx++
+          }
+        } else {
+          charIdx++
+        }
+      }
+      // 第一行结束，返回当前 charIdx（下一行开始位置）
+      return charIdx
+    }
+    return charIdx
+  }
+
+  /** 找到包含 offset 的行的起始位置 */
+  private findLineStart(offset: number): number {
+    // 向前找最近的 '\n'
+    const before = this.text.slice(0, offset)
+    const lastNewline = before.lastIndexOf('\n')
+    if (lastNewline >= 0) return lastNewline + 1
+    return 0
   }
 }
