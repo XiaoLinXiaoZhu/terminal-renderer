@@ -132,7 +132,7 @@ export class TextInput {
     if (this.stickyCol === null) this.stickyCol = this.cursorCol
 
     const targetRow = this.cursorRow - 1
-    if (targetRow < 0) {
+    if (targetRow < 0 || !this.rowHasOwner(grid, targetRow, ownerId)) {
       // 有内容在视口上方：回退 scrollOffset 并重新定位
       if (this.scrollOffset > 0) {
         const prevStart = this.findPrevVisualLineStart(grid, ownerId)
@@ -151,7 +151,7 @@ export class TextInput {
     if (this.stickyCol === null) this.stickyCol = this.cursorCol
 
     const targetRow = this.cursorRow + 1
-    if (targetRow >= grid.rows) {
+    if (targetRow >= grid.rows || !this.rowHasOwner(grid, targetRow, ownerId)) {
       // 有内容在视口下方：前进到下一视觉行
       const nextStart = this.findNextVisualLineStart(grid, ownerId)
       if (nextStart > this.cursorOffset && nextStart <= this.text.length) {
@@ -208,6 +208,15 @@ export class TextInput {
       if (charIdx >= d.start && charIdx < d.end) return d.style
     }
     return 0
+  }
+
+  /** 检查指定行是否有属于 ownerId 的 cell */
+  private rowHasOwner(grid: Grid, row: number, ownerId: string): boolean {
+    if (row < 0 || row >= grid.rows) return false
+    for (let col = 0; col < grid.cols; col++) {
+      if (grid.ownerAt(row, col) === ownerId) return true
+    }
+    return false
   }
 
   // --- 内部辅助 ---
