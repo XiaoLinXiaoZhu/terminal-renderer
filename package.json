@@ -1,0 +1,16 @@
+{
+  "name": "terminal-renderer",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@vue/reactivity": "^3.5.34",
+    "string-width": "^8.2.1"
+  }
+}
