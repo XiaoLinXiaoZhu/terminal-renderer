@@ -6,8 +6,9 @@
  * 退出: Ctrl+C
  */
 
-import { Grid, encodeStyle, BOLD, DIM, ITALIC, UNDERLINE } from '../src/grid.ts'
+import { Grid, encodeStyle, BOLD, ITALIC } from '../src/grid.ts'
 import { TextInput } from '../src/text-input.ts'
+import { Viewport } from '../src/viewport.ts'
 import { parseKey } from '../src/keys.ts'
 
 const stream = process.stderr
@@ -15,6 +16,7 @@ let cols = stream.columns || 80
 let rows = stream.rows || 24
 
 let grid = Grid.create(cols, rows)
+let vp = new Viewport(grid, stream)
 grid.setOwnerAll('input')
 
 const ti = new TextInput()
@@ -50,13 +52,12 @@ function render() {
   updateDecorations()
   ti.ensureCursorVisible(grid, 'input')
   ti.paint(grid, 'input')
-  stream.write('\x1b[H')
-  grid.flush(stream)
-  stream.write(`\x1b[${ti.cursorRow + 1};${ti.cursorCol + 1}H`)
+  vp.render({ row: ti.cursorRow, col: ti.cursorCol })
 }
 
 // 初始化
-stream.write('\x1b[?25l\x1b[2J\x1b[H')
+stream.write('\x1b[?25l')
+vp.mount()
 render()
 stream.write('\x1b[?25h')
 
@@ -72,7 +73,8 @@ process.stdin.on('data', (buf: Buffer) => {
     case 'ctrl':
       if (key.key === 'c') {
         stream.write('\x1b[?25h\x1b[0m')
-        stream.write(`\x1b[${rows};1H\n`)
+        vp.render({ row: rows - 1, col: 0 })
+        stream.write('\n')
         process.exit(0)
       }
       break
@@ -110,8 +112,9 @@ process.stdin.on('data', (buf: Buffer) => {
 process.stderr.on('resize', () => {
   cols = process.stderr.columns || 80
   rows = process.stderr.rows || 24
+  const oldRows = grid.rows
   grid.resize(cols, rows)
   grid.setOwnerAll('input')
-  stream.write('\x1b[2J\x1b[H')
+  vp.remount(oldRows)
   render()
 })

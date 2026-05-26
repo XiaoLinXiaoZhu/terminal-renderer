@@ -8,6 +8,7 @@
 
 import { Grid } from '../src/grid.ts'
 import { TextInput } from '../src/text-input.ts'
+import { Viewport } from '../src/viewport.ts'
 import { parseKey } from '../src/keys.ts'
 
 const stream = process.stderr
@@ -15,23 +16,21 @@ const cols = stream.columns || 80
 const rows = stream.rows || 24
 
 const grid = Grid.create(cols, rows)
+const vp = new Viewport(grid, stream)
 grid.setOwnerAll('input')
 
 const ti = new TextInput()
 
 function render() {
   ti.paint(grid, 'input')
-  stream.write('\x1b[H')
-  grid.flush(stream)
-  // 移动终端真实光标到 TextInput 光标位置
-  stream.write(`\x1b[${ti.cursorRow + 1};${ti.cursorCol + 1}H`)
+  vp.render({ row: ti.cursorRow, col: ti.cursorCol })
 }
 
-// 初始渲染
-stream.write('\x1b[?25l') // 隐藏光标（避免闪烁）
-stream.write('\x1b[2J\x1b[H') // 清屏
+// 初始化
+stream.write('\x1b[?25l')
+vp.mount()
 render()
-stream.write('\x1b[?25h') // 显示光标
+stream.write('\x1b[?25h')
 
 // 设置 raw mode
 if (process.stdin.isTTY) {
@@ -45,9 +44,9 @@ process.stdin.on('data', (buf: Buffer) => {
   switch (key.type) {
     case 'ctrl':
       if (key.key === 'c') {
-        // 退出
         stream.write('\x1b[?25h\x1b[0m')
-        stream.write(`\x1b[${rows};1H\n`)
+        vp.render({ row: rows - 1, col: 0 })
+        stream.write('\n')
         process.exit(0)
       }
       break
@@ -64,7 +63,6 @@ process.stdin.on('data', (buf: Buffer) => {
       ti.moveRight()
       break
     default:
-      // 忽略其他按键
       break
   }
 

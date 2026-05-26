@@ -8,6 +8,7 @@
 
 import { Grid, encodeStyle, BOLD, DIM } from '../src/grid.ts'
 import { TextInput } from '../src/text-input.ts'
+import { Viewport } from '../src/viewport.ts'
 import { parseKey } from '../src/keys.ts'
 import { charWidth } from '../src/width.ts'
 
@@ -16,6 +17,7 @@ let cols = stream.columns || 80
 let rows = stream.rows || 24
 
 let grid = Grid.create(cols, rows)
+let vp = new Viewport(grid, stream)
 const ti = new TextInput()
 ti.text = '这是一段环绕演示文本。文字会在中心块的两侧自然流动，就像报纸排版一样。试试输入更多文字，或者调整终端窗口大小观察重排效果。\n\nThe quick brown fox jumps over the lazy dog. This text wraps around the panel in the middle of the screen.'
 
@@ -90,13 +92,12 @@ function render() {
   ti.ensureCursorVisible(grid, 'input')
   ti.paint(grid, 'input')
   paintPanel()
-  stream.write('\x1b[H')
-  grid.flush(stream)
-  stream.write(`\x1b[${ti.cursorRow + 1};${ti.cursorCol + 1}H`)
+  vp.render({ row: ti.cursorRow, col: ti.cursorCol })
 }
 
 // 初始化
-stream.write('\x1b[?25l\x1b[2J\x1b[H')
+stream.write('\x1b[?25l')
+vp.mount()
 render()
 stream.write('\x1b[?25h')
 
@@ -112,7 +113,8 @@ process.stdin.on('data', (buf: Buffer) => {
     case 'ctrl':
       if (key.key === 'c') {
         stream.write('\x1b[?25h\x1b[0m')
-        stream.write(`\x1b[${rows};1H\n`)
+        vp.render({ row: rows - 1, col: 0 })
+        stream.write('\n')
         process.exit(0)
       }
       break
@@ -150,7 +152,8 @@ process.stdin.on('data', (buf: Buffer) => {
 process.stderr.on('resize', () => {
   cols = process.stderr.columns || 80
   rows = process.stderr.rows || 24
+  const oldRows = grid.rows
   grid.resize(cols, rows)
-  stream.write('\x1b[2J\x1b[H')
+  vp.remount(oldRows)
   render()
 })

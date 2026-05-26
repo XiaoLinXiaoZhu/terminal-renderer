@@ -159,11 +159,7 @@ export class Grid {
 
   // --- 上屏 ---
 
-  // TODO: flush 结束后调用者不知道终端光标在 grid 内的哪一行。
-  // 当前 workaround：调用者用 \x1b7/\x1b8 (save/restore) 包裹 flush 调用，
-  // 然后从已知的 grid home 重新定位。更干净的方案：flush 返回结束时的
-  // (row, col) 位置，或者 flush 结束后自动回到 grid home。
-  flush(stream: { write(s: string): void }): void {
+  flush(stream: { write(s: string): void }): { row: number; col: number } {
     // 调用者必须在调用前将终端光标定位到 Grid 的 home（左上角）
     let curRow = 0
     let curCol = 0
@@ -206,6 +202,8 @@ export class Grid {
         this.dirty[row]![col] = false
       }
     }
+
+    return { row: curRow, col: curCol }
   }
 
   // --- Resize ---

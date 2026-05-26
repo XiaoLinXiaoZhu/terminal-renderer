@@ -6,11 +6,13 @@
  */
 
 import { Grid, encodeStyle, BOLD, DIM, ITALIC, UNDERLINE } from '../src/grid.ts'
+import { Viewport } from '../src/viewport.ts'
 import { charWidth } from '../src/width.ts'
 
 const cols = process.stderr.columns || 80
 const rows = process.stderr.rows || 24
 const grid = Grid.create(cols, rows)
+const vp = new Viewport(grid, process.stderr)
 
 // 辅助：在指定行写入字符串（支持宽字符）
 function writeString(grid: Grid, row: number, startCol: number, text: string, style: number): void {
@@ -75,9 +77,9 @@ if (cols > 20) {
   writeString(grid, 13, 2, `col ${cols - 3}: '你' (fits)  |  col ${cols - 1}: '好' (overflow → space)`, infoStyle)
 }
 
-// flush 上屏
-process.stderr.write('\x1b[H')
-grid.flush(process.stderr)
+// 统一渲染
+vp.mount()
+vp.render({ row: rows - 1, col: 0 })
 
-// 光标移到底部，避免 shell prompt 覆盖输出
-process.stderr.write(`\x1b[${rows};1H\x1b[0m`)
+// 样式重置
+process.stderr.write('\x1b[0m\n')

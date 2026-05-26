@@ -7,16 +7,18 @@
  * 退出: Ctrl+C
  */
 
-import { Grid, encodeStyle, BOLD, DIM, ITALIC, UNDERLINE } from '../src/grid.ts'
+import { Grid, encodeStyle, BOLD, DIM, ITALIC } from '../src/grid.ts'
 import { TextInput } from '../src/text-input.ts'
+import { Viewport } from '../src/viewport.ts'
 import { parseKey } from '../src/keys.ts'
 import { charWidth } from '../src/width.ts'
 
 const stream = process.stderr
-const cols = stream.columns || 80
-const rows = stream.rows || 24
+let cols = stream.columns || 80
+let rows = stream.rows || 24
 
-const grid = Grid.create(cols, rows)
+let grid = Grid.create(cols, rows)
+let vp = new Viewport(grid, stream)
 const ti = new TextInput()
 
 ti.text = `# Hello Markdown
@@ -46,11 +48,11 @@ const dimStyle = encodeStyle(0, 0, DIM)
 
 // --- Layout ---
 
-const dividerCol = Math.floor(cols / 2)
-const leftWidth = dividerCol - 1
-const rightWidth = cols - dividerCol - 2
+function getDividerCol() { return Math.floor(cols / 2) }
 
 function setupOwnership() {
+  const dividerCol = getDividerCol()
+  const leftWidth = dividerCol - 1
   for (let r = 1; r < rows - 1; r++) {
     for (let c = 0; c < leftWidth; c++) {
       grid.setOwner(r, c, 'input')
@@ -66,52 +68,29 @@ interface StyledSpan {
 }
 
 function renderMarkdownLine(line: string): StyledSpan[] {
-  // Header
-  if (line.startsWith('# ')) {
-    return [{ text: line.slice(2), style: headerStyle }]
-  }
-  if (line.startsWith('## ')) {
-    return [{ text: line.slice(3), style: headerStyle }]
-  }
-  if (line.startsWith('### ')) {
-    return [{ text: line.slice(4), style: headerStyle }]
-  }
+  if (line.startsWith('# ')) return [{ text: line.slice(2), style: headerStyle }]
+  if (line.startsWith('## ')) return [{ text: line.slice(3), style: headerStyle }]
+  if (line.startsWith('### ')) return [{ text: line.slice(4), style: headerStyle }]
 
-  // Inline formatting
   const spans: StyledSpan[] = []
   let i = 0
   let current = ''
 
   while (i < line.length) {
-    // **bold**
     if (line[i] === '*' && line[i + 1] === '*') {
       if (current) { spans.push({ text: current, style: normalStyle }); current = '' }
       const end = line.indexOf('**', i + 2)
-      if (end >= 0) {
-        spans.push({ text: line.slice(i + 2, end), style: boldStyle })
-        i = end + 2
-        continue
-      }
+      if (end >= 0) { spans.push({ text: line.slice(i + 2, end), style: boldStyle }); i = end + 2; continue }
     }
-    // *italic*
     if (line[i] === '*' && line[i + 1] !== '*') {
       if (current) { spans.push({ text: current, style: normalStyle }); current = '' }
       const end = line.indexOf('*', i + 1)
-      if (end >= 0) {
-        spans.push({ text: line.slice(i + 1, end), style: italicStyle })
-        i = end + 1
-        continue
-      }
+      if (end >= 0) { spans.push({ text: line.slice(i + 1, end), style: italicStyle }); i = end + 1; continue }
     }
-    // `code`
     if (line[i] === '`') {
       if (current) { spans.push({ text: current, style: normalStyle }); current = '' }
       const end = line.indexOf('`', i + 1)
-      if (end >= 0) {
-        spans.push({ text: line.slice(i + 1, end), style: codeStyle })
-        i = end + 1
-        continue
-      }
+      if (end >= 0) { spans.push({ text: line.slice(i + 1, end), style: codeStyle }); i = end + 1; continue }
     }
     current += line[i]
     i++
@@ -136,6 +115,8 @@ function writeStr(row: number, col: number, text: string, style: number) {
 }
 
 function paintChrome() {
+  const dividerCol = getDividerCol()
+
   // Top bar
   writeStr(0, 0, ' EDIT', labelStyle)
   for (let c = 5; c < dividerCol; c++) grid.setChar(0, c, ' ', encodeStyle(0, 5))
@@ -152,8 +133,8 @@ function paintChrome() {
 }
 
 function paintPreview() {
+  const dividerCol = getDividerCol()
   const startCol = dividerCol + 2
-  const maxWidth = rightWidth
 
   // 清除预览区域
   for (let r = 1; r < rows - 1; r++) {
@@ -167,16 +148,10 @@ function paintPreview() {
   let row = 1
   for (const line of lines) {
     if (row >= rows - 1) break
+    if (line.trim() === '') { row++; continue }
 
-    if (line.trim() === '') {
-      row++
-      continue
-    }
-
-    // List items
     const isListItem = line.startsWith('- ')
     const displayLine = isListItem ? '• ' + line.slice(2) : line
-
     const spans = renderMarkdownLine(displayLine)
 
     let col = startCol
@@ -185,19 +160,9 @@ function paintPreview() {
         if (col >= cols - 1) { row++; col = startCol; if (row >= rows - 1) break }
         const w = charWidth(ch)
         if (w === 2) {
-          if (col + 1 < cols) {
-            grid.setWideChar(row, col, ch, span.style)
-            col += 2
-          } else {
-            row++; col = startCol
-            if (row >= rows - 1) break
-            grid.setWideChar(row, col, ch, span.style)
-            col += 2
-          }
-        } else {
-          grid.setChar(row, col, ch, span.style)
-          col++
-        }
+          if (col + 1 < cols) { grid.setWideChar(row, col, ch, span.style); col += 2 }
+          else { row++; col = startCol; if (row >= rows - 1) break; grid.setWideChar(row, col, ch, span.style); col += 2 }
+        } else { grid.setChar(row, col, ch, span.style); col++ }
       }
       if (row >= rows - 1) break
     }
@@ -211,14 +176,13 @@ function render() {
   ti.paint(grid, 'input')
   paintChrome()
   paintPreview()
-  stream.write('\x1b[H')
-  grid.flush(stream)
-  stream.write(`\x1b[${ti.cursorRow + 1};${ti.cursorCol + 1}H`)
+  vp.render({ row: ti.cursorRow, col: ti.cursorCol })
 }
 
 // --- Init ---
 
-stream.write('\x1b[?25l\x1b[2J\x1b[H')
+stream.write('\x1b[?25l')
+vp.mount()
 render()
 stream.write('\x1b[?25h')
 
@@ -234,7 +198,8 @@ process.stdin.on('data', (buf: Buffer) => {
     case 'ctrl':
       if (key.key === 'c') {
         stream.write('\x1b[?25h\x1b[0m')
-        stream.write(`\x1b[${rows};1H\n`)
+        vp.render({ row: rows - 1, col: 0 })
+        stream.write('\n')
         process.exit(0)
       }
       break
@@ -270,9 +235,10 @@ process.stdin.on('data', (buf: Buffer) => {
 
 // Resize
 process.stderr.on('resize', () => {
-  const newCols = process.stderr.columns || 80
-  const newRows = process.stderr.rows || 24
-  grid.resize(newCols, newRows)
-  stream.write('\x1b[2J\x1b[H')
+  cols = process.stderr.columns || 80
+  rows = process.stderr.rows || 24
+  const oldRows = grid.rows
+  grid.resize(cols, rows)
+  vp.remount(oldRows)
   render()
 })

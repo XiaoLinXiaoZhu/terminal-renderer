@@ -3,18 +3,23 @@
  *
  * 用 @vue/reactivity 的 watchEffect 驱动 paint cycle。
  * 展示：时钟、旋转器、进度条、弹跳球 — 全部由 reactive state 驱动。
+ *
+ * 全屏模式：动态区域高度 = 终端高度（Viewport 统一机制的特殊情况）。
+ *
  * 运行: bun demo/reactive.ts
  * 退出: Ctrl+C
  */
 
 import { ref, effect } from '@vue/reactivity'
 import { Grid, encodeStyle, BOLD, DIM, ITALIC } from '../src/grid.ts'
+import { Viewport } from '../src/viewport.ts'
 import { charWidth } from '../src/width.ts'
 
 const stream = process.stderr
 const cols = stream.columns || 80
 const rows = stream.rows || 24
 const grid = Grid.create(cols, rows)
+const vp = new Viewport(grid, stream)
 grid.setOwnerAll('display')
 
 // --- Reactive State ---
@@ -88,12 +93,7 @@ effect(() => {
   // Progress bar
   const barWidth = Math.min(40, cols - 14)
   const filled = Math.round((p / 100) * barWidth)
-  let bar = ''
-  for (let i = 0; i < barWidth; i++) {
-    bar += i < filled ? '█' : '░'
-  }
   writeStr(8, 2, '进度:', labelStyle)
-  // Split bar into filled and empty portions for styling
   for (let i = 0; i < barWidth; i++) {
     const ch = i < filled ? '█' : '░'
     const style = i < filled ? barFillStyle : barEmptyStyle
@@ -135,9 +135,8 @@ effect(() => {
   // Instructions
   writeStr(rows - 1, 2, 'Ctrl+C 退出 | 所有动画由 @vue/reactivity watchEffect 驱动', labelStyle)
 
-  // Flush
-  stream.write('\x1b[H')
-  grid.flush(stream)
+  // 统一渲染：Viewport 管理光标定位
+  vp.render()
 })
 
 // --- Animation Loop ---
@@ -159,7 +158,8 @@ setInterval(() => {
 
 // --- Setup ---
 
-stream.write('\x1b[?25l\x1b[2J\x1b[H') // hide cursor, clear screen
+stream.write('\x1b[?25l') // hide cursor
+vp.mount() // 全屏 = 在尾部预留 terminal-height 行空间
 
 if (process.stdin.isTTY) {
   process.stdin.setRawMode(true)
@@ -168,7 +168,8 @@ process.stdin.resume()
 process.stdin.on('data', (buf: Buffer) => {
   if (buf[0] === 3) { // Ctrl+C
     stream.write('\x1b[?25h\x1b[0m')
-    stream.write(`\x1b[${rows};1H\n`)
+    vp.render({ row: rows - 1, col: 0 })
+    stream.write('\n')
     process.exit(0)
   }
 })

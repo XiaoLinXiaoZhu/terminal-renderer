@@ -10,6 +10,7 @@
 
 import { Grid, encodeStyle, sgrFromEncoded, BOLD, DIM } from '../src/grid.ts'
 import { TextInput } from '../src/text-input.ts'
+import { Viewport } from '../src/viewport.ts'
 import { parseKey } from '../src/keys.ts'
 
 const stream = process.stderr
@@ -20,10 +21,8 @@ const GRID_ROWS = 10
 
 const grid = Grid.create(cols, GRID_ROWS)
 const ti = new TextInput()
+const vp = new Viewport(grid, stream)
 let promptCounter = 1
-
-// 终端光标当前在 grid 内的行位置（相对于 grid home）
-let cursorAtRow = 0
 
 // --- Styles ---
 const promptStyle = encodeStyle(3, 0, BOLD) // green bold
@@ -56,29 +55,11 @@ function setupGrid() {
   }
 }
 
-
-
-// render 使用 save/restore
 function render() {
   setupGrid()
   ti.ensureCursorVisible(grid, 'input')
   ti.paint(grid, 'input')
-
-  // 从当前 cursor 位置移到 grid home
-  if (cursorAtRow > 0) stream.write(`\x1b[${cursorAtRow}A`)
-  stream.write('\r')
-  // 现在在 grid home
-
-  // Save position (at grid home), flush, restore to grid home
-  stream.write('\x1b7') // save
-  grid.flush(stream)
-  stream.write('\x1b8') // restore to grid home
-
-  // 从 grid home 定位到 TextInput cursor
-  if (ti.cursorRow > 0) stream.write(`\x1b[${ti.cursorRow}B`)
-  stream.write('\r')
-  if (ti.cursorCol > 0) stream.write(`\x1b[${ti.cursorCol}C`)
-  cursorAtRow = ti.cursorRow
+  vp.render({ row: ti.cursorRow, col: ti.cursorCol })
 }
 
 // --- Submit ---
@@ -86,26 +67,19 @@ function render() {
 function submit() {
   if (ti.text.trim().length === 0) return
 
-  // 从当前位置移到 grid home
-  if (cursorAtRow > 0) stream.write(`\x1b[${cursorAtRow}A`)
-  stream.write('\r')
-
-  // 清除 grid 区域
-  stream.write('\x1b[J')
-
-  // 输出固化内容（带样式）
+  // 构建固化输出
   const prompt = `[${promptCounter}]> `
-  stream.write(sgrFromEncoded(promptStyle) + prompt + '\x1b[0m')
+  let output = sgrFromEncoded(promptStyle) + prompt + '\x1b[0m'
 
   const lines = ti.text.split('\n')
-  stream.write(lines[0]!)
+  output += lines[0]!
   for (let i = 1; i < lines.length; i++) {
-    stream.write('\n' + ' '.repeat(prompt.length) + lines[i])
+    output += '\n' + ' '.repeat(prompt.length) + lines[i]
   }
-  stream.write('\n')
+  output += '\n'
 
   // 分隔线
-  stream.write(sgrFromEncoded(dimStyle) + '─'.repeat(Math.min(40, cols)) + '\x1b[0m\n')
+  output += sgrFromEncoded(dimStyle) + '─'.repeat(Math.min(40, cols)) + '\x1b[0m\n'
 
   // 重置输入状态
   promptCounter++
@@ -113,13 +87,9 @@ function submit() {
   ti.cursorOffset = 0
   ti.scrollOffset = 0
 
-  // 为新 Grid 腾出空间（GRID_ROWS 个换行确保空间）
-  for (let i = 0; i < GRID_ROWS; i++) stream.write('\n')
-  stream.write(`\x1b[${GRID_ROWS}A`)
-
-  // 现在 cursor 在新 grid 的 home 位置
-  cursorAtRow = 0
+  // 固化内容到历史，重新预留空间
   grid.resize(cols, GRID_ROWS)
+  vp.commit(output)
   render()
 }
 
@@ -132,12 +102,8 @@ stream.write(sgrFromEncoded(dimStyle) + '── history demo ──\x1b[0m\n')
 stream.write(sgrFromEncoded(dimStyle) + '输入文本后按 Ctrl+D 提交 | Ctrl+C 退出\x1b[0m\n')
 stream.write(sgrFromEncoded(dimStyle) + '─'.repeat(Math.min(40, cols)) + '\x1b[0m\n')
 
-// 为 Grid 预留空间
-for (let i = 0; i < GRID_ROWS; i++) stream.write('\n')
-stream.write(`\x1b[${GRID_ROWS}A`)
-
-// 现在 cursor 在 grid home
-cursorAtRow = 0
+// 挂载动态区域
+vp.mount()
 render()
 stream.write('\x1b[?25h')
 
@@ -155,8 +121,7 @@ process.stdin.on('data', (buf: Buffer) => {
     case 'ctrl':
       if (key.key === 'c') {
         // 移到 grid 底部下方退出
-        const downNeeded = GRID_ROWS - 1 - cursorAtRow
-        if (downNeeded > 0) stream.write(`\x1b[${downNeeded}B`)
+        vp.render({ row: GRID_ROWS - 1, col: 0 })
         stream.write('\n\x1b[?25h\x1b[0m')
         process.exit(0)
       }
