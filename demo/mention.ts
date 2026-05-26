@@ -145,3 +145,14 @@ process.stdin.on('data', (buf: Buffer) => {
   updateOwnership()
   render()
 })
+
+// Resize
+process.stderr.on('resize', () => {
+  const newCols = process.stderr.columns || 80
+  const newRows = process.stderr.rows || 24
+  const oldRows = grid.rows
+  grid.resize(newCols, newRows)
+  vp.remount(oldRows)
+  updateOwnership()
+  render()
+})
