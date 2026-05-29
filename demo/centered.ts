@@ -34,12 +34,12 @@ const ti = new TextInput()
 let promptCounter = 1
 
 // --- Styles ---
-const patternStyle = encodeStyle(6, 0, DIM)   // magenta dim
-const borderStyle = encodeStyle(4, 0, DIM)     // yellow dim
-const headerStyle = encodeStyle(5, 0, BOLD)    // blue bold
-const statusStyle = encodeStyle(7, 5)          // cyan on blue
-const promptStyle = encodeStyle(3, 0, BOLD)    // green bold
-const dimStyle = encodeStyle(0, 0, DIM)
+const patternStyle = encodeStyle(5, -1, DIM)   // magenta dim
+const borderStyle = encodeStyle(3, -1, DIM)     // yellow dim
+const headerStyle = encodeStyle(4, -1, BOLD)    // blue bold
+const statusStyle = encodeStyle(6, 4)          // cyan on blue
+const promptStyle = encodeStyle(2, -1, BOLD)    // green bold
+const dimStyle = encodeStyle(-1, -1, DIM)
 
 // --- 花纹字符 ---
 const PATTERNS = ['░', '▒', '░', '▒']

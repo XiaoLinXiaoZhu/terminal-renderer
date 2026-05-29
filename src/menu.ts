@@ -9,8 +9,8 @@ import { Grid } from './grid.ts'
 import { encodeStyle } from './grid.ts'
 import { charWidth } from './width.ts'
 
-const NORMAL_STYLE = encodeStyle(0, 0)
-const HIGHLIGHT_STYLE = encodeStyle(1, 7) // black on white (inverted)
+const NORMAL_STYLE = encodeStyle(-1, -1)
+const HIGHLIGHT_STYLE = encodeStyle(0, 7) // black on white (inverted)
 
 export class Menu {
   items: string[] = []

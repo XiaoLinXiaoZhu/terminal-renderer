@@ -37,14 +37,14 @@ ti.cursorOffset = 0
 
 // --- Styles ---
 
-const borderStyle = encodeStyle(0, 0, DIM)
-const headerStyle = encodeStyle(4, 0, BOLD) // yellow bold
-const boldStyle = encodeStyle(8, 0, BOLD) // white bold
-const italicStyle = encodeStyle(7, 0, ITALIC) // cyan italic
-const codeStyle = encodeStyle(3, 0) // green
-const normalStyle = encodeStyle(0, 0)
-const labelStyle = encodeStyle(5, 0, BOLD) // blue bold
-const dimStyle = encodeStyle(0, 0, DIM)
+const borderStyle = encodeStyle(-1, -1, DIM)
+const headerStyle = encodeStyle(3, -1, BOLD) // yellow bold
+const boldStyle = encodeStyle(7, -1, BOLD) // white bold
+const italicStyle = encodeStyle(6, -1, ITALIC) // cyan italic
+const codeStyle = encodeStyle(2, -1) // green
+const normalStyle = encodeStyle(-1, -1)
+const labelStyle = encodeStyle(4, -1, BOLD) // blue bold
+const dimStyle = encodeStyle(-1, -1, DIM)
 
 // --- Layout ---
 
@@ -119,9 +119,9 @@ function paintChrome() {
 
   // Top bar
   writeStr(0, 0, ' EDIT', labelStyle)
-  for (let c = 5; c < dividerCol; c++) grid.setChar(0, c, ' ', encodeStyle(0, 5))
+  for (let c = 5; c < dividerCol; c++) grid.setChar(0, c, ' ', encodeStyle(-1, 4))
   writeStr(0, dividerCol + 1, ' PREVIEW', labelStyle)
-  for (let c = dividerCol + 9; c < cols; c++) grid.setChar(0, c, ' ', encodeStyle(0, 5))
+  for (let c = dividerCol + 9; c < cols; c++) grid.setChar(0, c, ' ', encodeStyle(-1, 4))
 
   // Vertical divider
   for (let r = 0; r < rows; r++) {

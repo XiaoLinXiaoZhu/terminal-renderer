@@ -33,13 +33,13 @@ const ballDy = ref(1)
 
 // --- Styles ---
 
-const titleStyle = encodeStyle(8, 0, BOLD)
-const clockStyle = encodeStyle(7, 0, BOLD) // cyan bold
-const spinnerStyle = encodeStyle(6, 0) // magenta
-const barFillStyle = encodeStyle(3, 0, BOLD) // green bold
-const barEmptyStyle = encodeStyle(0, 0, DIM)
-const ballStyle = encodeStyle(2, 0, BOLD) // red bold
-const labelStyle = encodeStyle(0, 0, DIM)
+const titleStyle = encodeStyle(7, -1, BOLD)
+const clockStyle = encodeStyle(6, -1, BOLD) // cyan bold
+const spinnerStyle = encodeStyle(5, -1) // magenta
+const barFillStyle = encodeStyle(2, -1, BOLD) // green bold
+const barEmptyStyle = encodeStyle(-1, -1, DIM)
+const ballStyle = encodeStyle(1, -1, BOLD) // red bold
+const labelStyle = encodeStyle(-1, -1, DIM)
 
 // --- Helpers ---
 
@@ -77,7 +77,7 @@ effect(() => {
 
   // Title
   writeStr(1, 2, '♦ terminal-renderer — Reactive Animation Demo', titleStyle)
-  writeStr(2, 2, '─'.repeat(Math.min(50, cols - 4)), encodeStyle(0, 0, DIM))
+  writeStr(2, 2, '─'.repeat(Math.min(50, cols - 4)), encodeStyle(-1, -1, DIM))
 
   // Clock
   const now = new Date()
@@ -103,7 +103,7 @@ effect(() => {
 
   // Counter
   writeStr(10, 2, '帧数:', labelStyle)
-  writeStr(10, 9, `${t}`, encodeStyle(4, 0))
+  writeStr(10, 9, `${t}`, encodeStyle(3, -1))
 
   // Bouncing ball
   const bx = ballX.value

@@ -25,9 +25,9 @@ const vp = new Viewport(grid, stream)
 let promptCounter = 1
 
 // --- Styles ---
-const promptStyle = encodeStyle(3, 0, BOLD) // green bold
-const dimStyle = encodeStyle(0, 0, DIM)
-const inputPromptStyle = encodeStyle(5, 0, BOLD) // blue bold
+const promptStyle = encodeStyle(2, -1, BOLD) // green bold
+const dimStyle = encodeStyle(-1, -1, DIM)
+const inputPromptStyle = encodeStyle(4, -1, BOLD) // blue bold
 
 // --- Grid Layout ---
 

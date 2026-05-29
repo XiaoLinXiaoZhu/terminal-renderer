@@ -49,15 +49,15 @@ const MENU_BOX_WIDTH = MENU_ITEM_WIDTH + 2 // +2 for left/right border
 const MENU_BOX_HEIGHT = menu.items.length + 2 // +2 for top/bottom border
 
 // --- Styles ---
-const promptStyle = encodeStyle(3, 0, BOLD)     // green bold
-const dimStyle = encodeStyle(0, 0, DIM)
-const statusBgStyle = encodeStyle(8, 5, BOLD)   // white on blue
-const statusDimStyle = encodeStyle(7, 5)        // cyan on blue
-const indicatorStyle = encodeStyle(4, 0, DIM)   // yellow dim
-const borderStyle = encodeStyle(6, 0)           // magenta
-const menuHighlight = encodeStyle(1, 8, BOLD)   // black on white bold
-const menuNormal = encodeStyle(8, 1)            // white on black
-const inputPromptStyle = encodeStyle(5, 0, BOLD) // blue bold
+const promptStyle = encodeStyle(2, -1, BOLD)     // green bold
+const dimStyle = encodeStyle(-1, -1, DIM)
+const statusBgStyle = encodeStyle(7, 4, BOLD)   // white on blue
+const statusDimStyle = encodeStyle(6, 4)        // cyan on blue
+const indicatorStyle = encodeStyle(3, -1, DIM)   // yellow dim
+const borderStyle = encodeStyle(5, -1)           // magenta
+const menuHighlight = encodeStyle(0, 7, BOLD)   // black on white bold
+const menuNormal = encodeStyle(7, 0)            // white on black
+const inputPromptStyle = encodeStyle(4, -1, BOLD) // blue bold
 
 // --- Helpers ---
 

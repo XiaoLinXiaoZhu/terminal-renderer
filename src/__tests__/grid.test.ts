@@ -19,7 +19,7 @@ describe('Grid — Step 0.1: 数据存储', () => {
 
   test('setChar/charAt 读写正确', () => {
     const grid = Grid.create(10, 5)
-    const style = encodeStyle(2, 0) // red fg
+    const style = encodeStyle(1, -1) // red fg
     grid.setChar(1, 3, 'A', style)
     expect(grid.charAt(1, 3)).toBe('A')
     expect(grid.styleAt(1, 3)).toBe(style)
@@ -204,8 +204,8 @@ describe('Grid — Step 0.3: flush 上屏', () => {
 
   test('样式变化时输出 SGR', () => {
     const grid = Grid.create(10, 5)
-    const redStyle = encodeStyle(2, 0)
-    const greenStyle = encodeStyle(3, 0)
+    const redStyle = encodeStyle(1, -1)
+    const greenStyle = encodeStyle(2, -1)
     grid.setChar(0, 0, 'R', redStyle)
     grid.setChar(0, 1, 'G', greenStyle)
     const output: string[] = []

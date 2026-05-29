@@ -3,31 +3,23 @@
  *
  * SoA 存储模型 + cell 粒度 dirty tracking + flush 上屏。
  *
- * 样式编码（32-bit，仅用低 28 bits）：
- *   bits 0-7:   fg 值
+ * 样式编码（32-bit，仅用低 24 bits）：
+ *   bits 0-7:   fg 值（256 色索引 / truecolor 注册表索引）
  *   bits 8-15:  bg 值
  *   bits 16-19: flags (bold/dim/italic/underline)
- *   bits 20-23: fg 类型 (0=basic, 1=256色, 2=truecolor)
- *   bits 24-27: bg 类型 (0=basic, 1=256色, 2=truecolor)
- *   bits 28-31: 保留
+ *   bits 20-21: fg 模式 (0=default, 1=256色, 2=truecolor)
+ *   bits 22-23: bg 模式 (0=default, 1=256色, 2=truecolor)
+ *   bits 24-31: 保留
  *
- * fg/bg 类型 = 0 (basic):
- *   值 0 = default, 1-8 = 基本色 (30-37), 9-16 = 亮色 (90-97)
- *
- * fg/bg 类型 = 1 (256色):
- *   值 0-255 = 256 色调色板索引
- *
- * fg/bg 类型 = 2 (truecolor):
- *   值 = 全局 truecolor 注册表索引（0-255，共 256 个槽位）
+ * 256 色调色板前 16 色：
+ *   0-7   = 基本色 (SGR 30-37), 8-15 = 亮色 (SGR 90-97)
  */
 
 // ── 全局 truecolor 注册表 ──
-// fgRegistry 和 bgRegistry 各自维护，避免 fg/bg 共用索引时碰撞
-const fgRegistry: [number, number, number][] = []  // [r, g, b]
-const bgRegistry: [number, number, number][] = []  // [r, g, b]
+const fgRegistry: [number, number, number][] = []
+const bgRegistry: [number, number, number][] = []
 
 function registerFgColor(r: number, g: number, b: number): number {
-  // 先查找是否已存在
   for (let i = 0; i < fgRegistry.length; i++) {
     const entry = fgRegistry[i]!
     if (entry[0] === r && entry[1] === g && entry[2] === b) return i
@@ -59,80 +51,71 @@ export const DIM       = 1 << 17
 export const ITALIC    = 1 << 18
 export const UNDERLINE = 1 << 19
 
-// 类型偏移
-const FG_TYPE_SHIFT = 20
-const BG_TYPE_SHIFT = 24
-
-// 类型值
-const TYPE_BASIC    = 0
-const TYPE_256      = 1
-const TYPE_TRUECOLOR = 2
+// 模式偏移与值
+const FG_MODE_SHIFT = 20
+const BG_MODE_SHIFT = 22
+const MODE_DEFAULT    = 0
+const MODE_256        = 1
+const MODE_TRUECOLOR  = 2
 
 // ── 公开 API ──
 
-/**
- * 基本色 / 亮色样式。
- * fg, bg: 0=default, 1-8=基本色 (30-37), 9-16=亮色 (90-97)。
- */
-export function encodeStyle(fg: number, bg: number, flags: number = 0): number {
-  return (fg & 0xFF) | ((bg & 0xFF) << 8) | (flags & 0xF0000) |
-    (TYPE_BASIC << FG_TYPE_SHIFT) | (TYPE_BASIC << BG_TYPE_SHIFT)
-}
+type ColorSpec = number | [number, number, number]
 
 /**
- * 256 色调色板样式。
- * fg, bg: 0-255。（0 = 调色板索引 0，不同于 default；如需 default 用 encodeStyle）
+ * 统一样式编码。
+ *
+ * @param fg 前景色：-1 = default, 0-255 = 256 色调色板, [r,g,b] = truecolor
+ * @param bg 背景色：同上
+ * @param flags 样式标志（BOLD | DIM | ITALIC | UNDERLINE）
+ *
+ * 示例：
+ *   encodeStyle(-1, -1)              // default
+ *   encodeStyle(1, -1, BOLD)         // 红色加粗（256 色索引 1）
+ *   encodeStyle(9, -1)               // 亮红色
+ *   encodeStyle([255,128,0], -1)     // 橙色 truecolor
  */
-export function encodeStyle256(fg: number, bg: number, flags: number = 0): number {
-  return (fg & 0xFF) | ((bg & 0xFF) << 8) | (flags & 0xF0000) |
-    (TYPE_256 << FG_TYPE_SHIFT) | (TYPE_256 << BG_TYPE_SHIFT)
-}
+export function encodeStyle(fg: ColorSpec, bg: ColorSpec, flags: number = 0): number {
+  const fgMode = typeof fg === 'number' ? (fg < 0 ? MODE_DEFAULT : MODE_256) : MODE_TRUECOLOR
+  const bgMode = typeof bg === 'number' ? (bg < 0 ? MODE_DEFAULT : MODE_256) : MODE_TRUECOLOR
 
-/**
- * Truecolor (24-bit RGB) 样式。
- * 每个参数为 [r, g, b] 元组（0-255），传入 [0,0,0] 表示 default。
- */
-export function encodeStyleRGB(
-  fg: [number, number, number],
-  bg: [number, number, number],
-  flags: number = 0,
-): number {
-  const fgIdx = registerFgColor(fg[0], fg[1], fg[2])
-  const bgIdx = registerBgColor(bg[0], bg[1], bg[2])
-  return (fgIdx & 0xFF) | ((bgIdx & 0xFF) << 8) | (flags & 0xF0000) |
-    (TYPE_TRUECOLOR << FG_TYPE_SHIFT) | (TYPE_TRUECOLOR << BG_TYPE_SHIFT)
+  let fgVal = 0
+  let bgVal = 0
+
+  if (fgMode === MODE_256) fgVal = (fg as number) & 0xFF
+  else if (fgMode === MODE_TRUECOLOR) {
+    const rgb = fg as [number, number, number]
+    fgVal = registerFgColor(rgb[0], rgb[1], rgb[2])
+  }
+
+  if (bgMode === MODE_256) bgVal = (bg as number) & 0xFF
+  else if (bgMode === MODE_TRUECOLOR) {
+    const rgb = bg as [number, number, number]
+    bgVal = registerBgColor(rgb[0], rgb[1], rgb[2])
+  }
+
+  return (fgVal & 0xFF) | ((bgVal & 0xFF) << 8) | (flags & 0xF0000) |
+    (fgMode << FG_MODE_SHIFT) | (bgMode << BG_MODE_SHIFT)
 }
 
 // ── SGR 生成 ──
 
-// 基本色映射（type=basic, value 1-8 → 30-37）
-const BASIC_FG: Record<number, number> = {
-  0: 39,
-  1: 30, 2: 31, 3: 32, 4: 33, 5: 34, 6: 35, 7: 36, 8: 37,
+// 256 色调色板前 8 色 → SGR 30-37
+const FG_256: Record<number, number> = {
+  0: 30, 1: 31, 2: 32, 3: 33, 4: 34, 5: 35, 6: 36, 7: 37,
 }
-const BASIC_BG: Record<number, number> = {
-  0: 49,
-  1: 40, 2: 41, 3: 42, 4: 43, 5: 44, 6: 45, 7: 46, 8: 47,
+const BG_256: Record<number, number> = {
+  0: 40, 1: 41, 2: 42, 3: 43, 4: 44, 5: 45, 6: 46, 7: 47,
 }
 
-// 亮色映射（type=basic, value 9-16 → 90-97）
-const BRIGHT_FG: Record<number, number> = {
-  9: 90, 10: 91, 11: 92, 12: 93, 13: 94, 14: 95, 15: 96, 16: 97,
-}
-const BRIGHT_BG: Record<number, number> = {
-  9: 100, 10: 101, 11: 102, 12: 103, 13: 104, 14: 105, 15: 106, 16: 107,
-}
-
-function fgSGR(kind: number, value: number): string {
-  if (kind === TYPE_BASIC) {
-    if (value === 0) return '39'
-    if (value <= 8) return String(BASIC_FG[value] ?? 39)
-    return String(BRIGHT_FG[value] ?? 39)
-  }
-  if (kind === TYPE_256) {
+function fgSGR(mode: number, value: number): string {
+  if (mode === MODE_DEFAULT) return '39'
+  if (mode === MODE_256) {
+    if (value <= 7) return String(FG_256[value] ?? 39)
+    if (value <= 15) return String(90 + (value - 8)) // bright: 90-97
     return `38;5;${value & 0xFF}`
   }
-  if (kind === TYPE_TRUECOLOR) {
+  if (mode === MODE_TRUECOLOR) {
     const rgb = fgRegistry[value & 0xFF]
     if (!rgb) return '39'
     return `38;2;${rgb[0]};${rgb[1]};${rgb[2]}`
@@ -140,16 +123,14 @@ function fgSGR(kind: number, value: number): string {
   return '39'
 }
 
-function bgSGR(kind: number, value: number): string {
-  if (kind === TYPE_BASIC) {
-    if (value === 0) return '49'
-    if (value <= 8) return String(BASIC_BG[value] ?? 49)
-    return String(BRIGHT_BG[value] ?? 49)
-  }
-  if (kind === TYPE_256) {
+function bgSGR(mode: number, value: number): string {
+  if (mode === MODE_DEFAULT) return '49'
+  if (mode === MODE_256) {
+    if (value <= 7) return String(BG_256[value] ?? 49)
+    if (value <= 15) return String(100 + (value - 8)) // bright bg: 100-107
     return `48;5;${value & 0xFF}`
   }
-  if (kind === TYPE_TRUECOLOR) {
+  if (mode === MODE_TRUECOLOR) {
     const rgb = bgRegistry[value & 0xFF]
     if (!rgb) return '49'
     return `48;2;${rgb[0]};${rgb[1]};${rgb[2]}`
@@ -163,15 +144,15 @@ export function sgrFromEncoded(style: number): string {
   const fgVal = style & 0xFF
   const bgVal = (style >> 8) & 0xFF
   const flags = style & 0xF0000
-  const fgKind = (style >> FG_TYPE_SHIFT) & 0xF
-  const bgKind = (style >> BG_TYPE_SHIFT) & 0xF
+  const fgMode = (style >> FG_MODE_SHIFT) & 3
+  const bgMode = (style >> BG_MODE_SHIFT) & 3
 
-  const parts: string[] = ['0'] // always reset first
+  const parts: string[] = ['0']
 
-  const fgPart = fgSGR(fgKind, fgVal)
+  const fgPart = fgSGR(fgMode, fgVal)
   if (fgPart !== '39') parts.push(fgPart)
 
-  const bgPart = bgSGR(bgKind, bgVal)
+  const bgPart = bgSGR(bgMode, bgVal)
   if (bgPart !== '49') parts.push(bgPart)
 
   if (flags & BOLD)      parts.push('1')
@@ -213,12 +194,10 @@ export class Grid {
   setChar(row: number, col: number, char: string, style: number): void {
     if (row < 0 || row >= this.rows || col < 0 || col >= this.cols) return
 
-    // 如果写入位置是 continuation cell，先清理关联的主 cell
     if (this.flags[row]![col]! & IS_CONTINUATION) {
       this.clearMainCellOf(row, col)
     }
 
-    // 如果写入位置是宽字符的主 cell（右边是 continuation），清理 continuation
     if (col + 1 < this.cols && (this.flags[row]![col + 1]! & IS_CONTINUATION)) {
       this.chars[row]![col + 1] = ' '
       this.styles[row]![col + 1] = 0
@@ -227,7 +206,7 @@ export class Grid {
     }
 
     if (this.chars[row]![col] === char && this.styles[row]![col] === style && !(this.flags[row]![col]! & IS_CONTINUATION)) {
-      return // 值相同且不是 continuation → 不标记 dirty
+      return
     }
 
     this.chars[row]![col] = char
@@ -239,18 +218,15 @@ export class Grid {
   setWideChar(row: number, col: number, char: string, style: number): void {
     if (row < 0 || row >= this.rows || col < 0 || col >= this.cols) return
 
-    // 行末放不下宽字符
     if (col + 1 >= this.cols) {
       this.setChar(row, col, ' ', 0)
       return
     }
 
-    // 如果写入位置是 continuation cell，先清理关联的主 cell
     if (this.flags[row]![col]! & IS_CONTINUATION) {
       this.clearMainCellOf(row, col)
     }
 
-    // 如果 continuation 位置（col+1）本身是宽字符的主 cell，清理它的 continuation
     if (col + 2 < this.cols && (this.flags[row]![col + 2]! & IS_CONTINUATION)) {
       this.chars[row]![col + 2] = ' '
       this.styles[row]![col + 2] = 0
@@ -258,12 +234,10 @@ export class Grid {
       this.dirty[row]![col + 2] = true
     }
 
-    // 如果 continuation 位置是另一个宽字符的 continuation，清理那个主 cell
     if (this.flags[row]![col + 1]! & IS_CONTINUATION) {
       this.clearMainCellOf(row, col + 1)
     }
 
-    // 写入主 cell
     const oldChar = this.chars[row]![col]
     const oldStyle = this.styles[row]![col]
     const oldFlags = this.flags[row]![col]
@@ -274,7 +248,6 @@ export class Grid {
       this.dirty[row]![col] = true
     }
 
-    // 写入 continuation cell
     const oldContChar = this.chars[row]![col + 1]
     const oldContStyle = this.styles[row]![col + 1]
     const oldContFlags = this.flags[row]![col + 1]
@@ -334,7 +307,6 @@ export class Grid {
   // --- 上屏 ---
 
   flush(stream: { write(s: string): void }): { row: number; col: number } {
-    // 调用者必须在调用前将终端光标定位到 Grid 的 home（左上角）
     let curRow = 0
     let curCol = 0
     let currentStyle = -1
@@ -347,7 +319,6 @@ export class Grid {
           continue
         }
 
-        // 移动光标到 (row, col)
         if (row !== curRow || col !== curCol) {
           if (row > curRow) stream.write(`\x1b[${row - curRow}B`)
           else if (row < curRow) stream.write(`\x1b[${curRow - row}A`)
@@ -357,16 +328,13 @@ export class Grid {
           curCol = col
         }
 
-        // 设置样式
         if (this.styles[row]![col] !== currentStyle) {
           currentStyle = this.styles[row]![col]!
           stream.write(sgrFromEncoded(currentStyle))
         }
 
-        // 写入字符
         stream.write(this.chars[row]![col]!)
         curCol++
-        // 宽字符会让终端光标前进 2 列
         if (col + 1 < this.cols && (this.flags[row]![col + 1]! & IS_CONTINUATION)) {
           curCol++
         }

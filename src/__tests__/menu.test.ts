@@ -3,8 +3,8 @@ import { Grid, encodeStyle } from '../grid.ts'
 import { Menu } from '../menu.ts'
 import { gridToString } from './helpers/grid-to-string.ts'
 
-const NORMAL_STYLE = encodeStyle(0, 0)
-const HIGHLIGHT_STYLE = encodeStyle(1, 7) // black on white
+const NORMAL_STYLE = encodeStyle(-1, -1)
+const HIGHLIGHT_STYLE = encodeStyle(0, 7) // black on white
 
 describe('Menu — Step 3.2', () => {
   test('items 正确渲染到 owned cells', () => {

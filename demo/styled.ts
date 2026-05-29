@@ -34,14 +34,14 @@ function updateDecorations() {
     decorations.push({
       start: match.index,
       end: match.index + match[0].length,
-      style: encodeStyle(5, 0, BOLD), // blue bold
+      style: encodeStyle(4, -1, BOLD), // blue bold
     })
   }
   while ((match = hashRegex.exec(ti.text)) !== null) {
     decorations.push({
       start: match.index,
       end: match.index + match[0].length,
-      style: encodeStyle(3, 0, ITALIC), // green italic
+      style: encodeStyle(2, -1, ITALIC), // green italic
     })
   }
 

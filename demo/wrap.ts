@@ -24,8 +24,8 @@ ti.text = '这是一段环绕演示文本。文字会在中心块的两侧自然
 // Panel 参数
 const PANEL_WIDTH = 16
 const PANEL_HEIGHT = 5
-const PANEL_STYLE = encodeStyle(7, 5, BOLD) // cyan on blue
-const BORDER_STYLE = encodeStyle(4, 0, DIM) // yellow dim
+const PANEL_STYLE = encodeStyle(6, 4, BOLD) // cyan on blue
+const BORDER_STYLE = encodeStyle(3, -1, DIM) // yellow dim
 
 function updateOwnership() {
   grid.setOwnerAll('input')

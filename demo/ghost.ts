@@ -74,10 +74,10 @@ function updateGhostText() {
 
 // --- Styles ---
 
-const ghostStyle = encodeStyle(0, 0, DIM)
-const headerStyle = encodeStyle(5, 0, BOLD) // blue bold
-const statusStyle = encodeStyle(7, 5)       // cyan on blue
-const dimStyle = encodeStyle(0, 0, DIM)
+const ghostStyle = encodeStyle(-1, -1, DIM)
+const headerStyle = encodeStyle(4, -1, BOLD) // blue bold
+const statusStyle = encodeStyle(6, 4)       // cyan on blue
+const dimStyle = encodeStyle(-1, -1, DIM)
 
 // --- Layout ---
 
@@ -149,7 +149,7 @@ function render() {
 // --- Init ---
 
 stream.write('\x1b[?25l')
-stream.write(encodeStyle(0, 0, DIM) ? '' : '')
+stream.write(encodeStyle(-1, -1, DIM) ? '' : '')
 
 vp.mount()
 render()

@@ -1,4 +1,4 @@
-export { Grid, IS_CONTINUATION, encodeStyle, encodeStyle256, encodeStyleRGB, sgrFromEncoded, BOLD, DIM, ITALIC, UNDERLINE } from './grid.ts'
+export { Grid, IS_CONTINUATION, encodeStyle, sgrFromEncoded, BOLD, DIM, ITALIC, UNDERLINE } from './grid.ts'
 export { charWidth } from './width.ts'
 export { TextInput } from './text-input.ts'
 export { parseKey } from './keys.ts'
