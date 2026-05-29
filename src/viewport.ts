@@ -29,6 +29,22 @@ export class Viewport {
   }
 
   /**
+   * 开始 DEC 2026 同步输出。发送后终端会在垂直消隐期刷新画面，消除撕裂/闪烁。
+   * 必须与 endSync() 配对使用。
+   */
+  beginSync(): void {
+    this.stream.write('\x1b[?2026h')
+  }
+
+  /**
+   * 结束 DEC 2026 同步输出。发送后终端恢复普通刷新模式。
+   * 必须与 beginSync() 配对使用。
+   */
+  endSync(): void {
+    this.stream.write('\x1b[?2026l')
+  }
+
+  /**
    * 在终端尾部预留空间并定位到 grid home。
    * 输出 grid.rows 个换行确保终端有足够空间，然后上移回到起始位置。
    */
