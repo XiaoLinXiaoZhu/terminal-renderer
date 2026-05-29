@@ -1,54 +1,134 @@
 import { describe, test, expect } from 'bun:test'
-import { encodeStyle, sgrFromEncoded, BOLD, DIM, ITALIC, UNDERLINE } from '../grid.ts'
+import { encodeStyle, encodeStyle256, encodeStyleRGB, sgrFromEncoded, BOLD, DIM, ITALIC, UNDERLINE } from '../grid.ts'
 
-describe('Style — Step 5.1: 样式编码与输出', () => {
-  test('encodeStyle 正确编码 fg/bg/flags', () => {
-    expect(encodeStyle(0, 0)).toBe(0)
-    expect(encodeStyle(2, 0)).toBe(2) // red fg
-    expect(encodeStyle(0, 3)).toBe(0x30) // green bg
-    expect(encodeStyle(2, 3)).toBe(0x32) // red fg + green bg
-    expect(encodeStyle(2, 3, BOLD)).toBe(0x132) // + bold
-    expect(encodeStyle(0, 0, BOLD | ITALIC)).toBe(0x500) // bold + italic
+describe('encodeStyle (basic/bright)', () => {
+  test('default', () => {
+    expect(encodeStyle(0, 0)).toBe(0) // fg=0,bg=0,type=basic→0
   })
 
-  test('sgrFromEncoded style=0 → reset', () => {
+  test('fg 基本色', () => {
+    const s = encodeStyle(2, 0) // red fg
+    expect(s & 0xFF).toBe(2) // fg=2
+  })
+
+  test('bg 基本色', () => {
+    const s = encodeStyle(0, 3) // green bg
+    expect((s >> 8) & 0xFF).toBe(3) // bg=3
+  })
+
+  test('flags 正确编码', () => {
+    const s = encodeStyle(2, 3, BOLD)
+    expect(s & BOLD).not.toBe(0)
+
+    const s2 = encodeStyle(0, 0, BOLD | ITALIC)
+    expect(s2 & BOLD).not.toBe(0)
+    expect(s2 & ITALIC).not.toBe(0)
+  })
+
+  test('亮色 fg (90-97)', () => {
+    const s = encodeStyle(9, 0) // bright black = gray
+    expect(s & 0xFF).toBe(9)
+  })
+
+  test('亮色 bg (100-107)', () => {
+    const s = encodeStyle(0, 9)
+    expect((s >> 8) & 0xFF).toBe(9)
+  })
+})
+
+describe('encodeStyle256', () => {
+  test('256 色 fg', () => {
+    const s = encodeStyle256(196, 0)
+    const fgKind = (s >> 20) & 0xF
+    expect(fgKind).toBe(1) // TYPE_256
+    expect(s & 0xFF).toBe(196)
+  })
+
+  test('256 色 bg', () => {
+    const s = encodeStyle256(0, 42)
+    const bgKind = (s >> 24) & 0xF
+    expect(bgKind).toBe(1) // TYPE_256
+    expect((s >> 8) & 0xFF).toBe(42)
+  })
+})
+
+describe('encodeStyleRGB', () => {
+  test('truecolor fg + bg', () => {
+    const s = encodeStyleRGB([255, 128, 64], [10, 20, 30])
+    const fgKind = (s >> 20) & 0xF
+    const bgKind = (s >> 24) & 0xF
+    expect(fgKind).toBe(2) // TYPE_TRUECOLOR
+    expect(bgKind).toBe(2) // TYPE_TRUECOLOR
+  })
+
+  test('相同 RGB 复用索引', () => {
+    const s1 = encodeStyleRGB([100, 200, 50], [0, 0, 0])
+    const s2 = encodeStyleRGB([100, 200, 50], [0, 0, 0])
+    expect(s1).toBe(s2) // 应返回相同的 style 值
+  })
+})
+
+describe('sgrFromEncoded', () => {
+  test('style=0 → reset', () => {
     expect(sgrFromEncoded(0)).toBe('\x1b[0m')
   })
 
-  test('sgrFromEncoded fg 颜色正确', () => {
+  test('fg 基本色', () => {
     const sgr = sgrFromEncoded(encodeStyle(2, 0)) // red
-    expect(sgr).toContain('31') // ANSI red = 31
+    expect(sgr).toContain('31')
   })
 
-  test('sgrFromEncoded bg 颜色正确', () => {
+  test('bg 基本色', () => {
     const sgr = sgrFromEncoded(encodeStyle(0, 3)) // green bg
-    expect(sgr).toContain('42') // ANSI green bg = 42
+    expect(sgr).toContain('42')
   })
 
-  test('sgrFromEncoded flags 正确', () => {
-    const boldSgr = sgrFromEncoded(encodeStyle(0, 0, BOLD))
-    expect(boldSgr).toContain(';1') // bold = SGR 1
-
-    const dimSgr = sgrFromEncoded(encodeStyle(0, 0, DIM))
-    expect(dimSgr).toContain(';2') // dim = SGR 2
-
-    const italicSgr = sgrFromEncoded(encodeStyle(0, 0, ITALIC))
-    expect(italicSgr).toContain(';3') // italic = SGR 3
-
-    const ulSgr = sgrFromEncoded(encodeStyle(0, 0, UNDERLINE))
-    expect(ulSgr).toContain(';4') // underline = SGR 4
+  test('flags', () => {
+    expect(sgrFromEncoded(encodeStyle(0, 0, BOLD))).toContain(';1')
+    expect(sgrFromEncoded(encodeStyle(0, 0, DIM))).toContain(';2')
+    expect(sgrFromEncoded(encodeStyle(0, 0, ITALIC))).toContain(';3')
+    expect(sgrFromEncoded(encodeStyle(0, 0, UNDERLINE))).toContain(';4')
   })
 
-  test('sgrFromEncoded 组合样式', () => {
+  test('组合基本色 + flags', () => {
     const sgr = sgrFromEncoded(encodeStyle(2, 5, BOLD | UNDERLINE))
     expect(sgr).toContain('31') // red fg
     expect(sgr).toContain('44') // blue bg
     expect(sgr).toContain(';1') // bold
     expect(sgr).toContain(';4') // underline
   })
+
+  test('亮色 fg (90)', () => {
+    const sgr = sgrFromEncoded(encodeStyle(9, 0)) // bright black
+    expect(sgr).toContain('90')
+  })
+
+  test('亮色 bg (100)', () => {
+    const sgr = sgrFromEncoded(encodeStyle(0, 10)) // bright red bg
+    expect(sgr).toContain('101')
+  })
+
+  test('256 色', () => {
+    const sgr = sgrFromEncoded(encodeStyle256(196, 42))
+    expect(sgr).toContain('38;5;196')
+    expect(sgr).toContain('48;5;42')
+  })
+
+  test('truecolor', () => {
+    const sgr = sgrFromEncoded(encodeStyleRGB([255, 128, 64], [10, 20, 30]))
+    expect(sgr).toContain('38;2;255;128;64')
+    expect(sgr).toContain('48;2;10;20;30')
+  })
+
+  test('default 颜色不输出 SGR 码（仅 reset）', () => {
+    const sgr = sgrFromEncoded(encodeStyle(0, 0, BOLD))
+    expect(sgr).not.toContain('39')
+    expect(sgr).not.toContain('49')
+    expect(sgr).toContain(';1')
+  })
 })
 
-describe('TextInput — Step 5.2: Decorations', () => {
+describe('TextInput — Decorations (with new encoding)', () => {
   const { Grid } = require('../grid.ts')
   const { TextInput } = require('../text-input.ts')
 
@@ -94,11 +174,9 @@ describe('TextInput — Step 5.2: Decorations', () => {
     ti.decorations = [{ start: 3, end: 7, style: encodeStyle(4, 0, BOLD) }] // DEFG bold yellow
     ti.paint(grid, 'input')
 
-    // row 0: ABCDE — D,E styled
     expect(grid.styleAt(0, 2)).toBe(0) // C
     expect(grid.styleAt(0, 3)).toBe(encodeStyle(4, 0, BOLD)) // D
     expect(grid.styleAt(0, 4)).toBe(encodeStyle(4, 0, BOLD)) // E
-    // row 1: FGH — F,G styled, H not
     expect(grid.styleAt(1, 0)).toBe(encodeStyle(4, 0, BOLD)) // F
     expect(grid.styleAt(1, 1)).toBe(encodeStyle(4, 0, BOLD)) // G
     expect(grid.styleAt(1, 2)).toBe(0) // H
