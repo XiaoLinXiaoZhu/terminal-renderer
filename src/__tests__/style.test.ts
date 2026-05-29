@@ -96,7 +96,7 @@ describe('sgrFromEncoded', () => {
 
 describe('TextInput — Decorations', () => {
   const { Grid } = require('../grid.ts')
-  const { TextInput } = require('../text-input.ts')
+  const { TextInput } = require('../text-input')
 
   test('decoration 区间内字符用指定样式', () => {
     const grid = Grid.create(10, 1)

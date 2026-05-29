@@ -11,7 +11,7 @@
  */
 
 import { Grid, encodeStyle, BOLD, DIM } from '../../src/grid.ts'
-import { TextInput } from '../../src/text-input.ts'
+import { TextInput } from '../../src/text-input'
 import { Menu } from '../../src/menu.ts'
 import { charWidth, stringWidth } from '../../src/width.ts'
 

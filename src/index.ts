@@ -1,6 +1,6 @@
 export { Grid, IS_CONTINUATION, encodeStyle, sgrFromEncoded, BOLD, DIM, ITALIC, UNDERLINE } from './grid.ts'
 export { charWidth, stringWidth, stripANSI } from './width.ts'
-export { TextInput } from './text-input.ts'
+export { TextInput } from './text-input/index.ts'
 export { parseKey } from './keys.ts'
 export { Menu } from './menu.ts'
 export { parseSGR, writeSGRToGrid } from './sgr.ts'

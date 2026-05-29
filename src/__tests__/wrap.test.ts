@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { Grid } from '../grid.ts'
-import { TextInput } from '../text-input.ts'
+import { TextInput } from '../text-input'
 import { gridToString } from './helpers/grid-to-string.ts'
 
 describe('TextInput — Step 4.1: 非连续 Ownership 区域', () => {

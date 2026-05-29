@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { Grid } from '../grid.ts'
-import { TextInput } from '../text-input.ts'
+import { TextInput } from '../text-input'
 import { gridToString } from './helpers/grid-to-string.ts'
 
 describe('TextInput — Step 1.1: paint', () => {
@@ -687,5 +687,52 @@ describe('TextInput — Step 2.3: 滚动', () => {
     // 滚动后 Line3 应该在视口内
     expect(ti.cursorRow).toBeGreaterThanOrEqual(0)
     expect(ti.cursorRow).toBeLessThan(2)
+  })
+})
+
+describe('TextInput — 粘贴 (insertText)', () => {
+  test('在光标处插入多字符文本，光标移到末尾', () => {
+    const ti = new TextInput()
+    ti.text = 'AB'
+    ti.cursorOffset = 1
+    ti.insertText('xyz')
+    expect(ti.text).toBe('AxyzB')
+    expect(ti.cursorOffset).toBe(4)
+  })
+
+  test('CRLF 被规范化为 LF', () => {
+    const ti = new TextInput()
+    ti.insertText('a\r\nb')
+    expect(ti.text).toBe('a\nb')
+    expect(ti.cursorOffset).toBe(3)
+  })
+
+  test('裸 CR 被规范化为 LF', () => {
+    const ti = new TextInput()
+    ti.insertText('a\rb')
+    expect(ti.text).toBe('a\nb')
+  })
+
+  test('混合换行符全部归一为 LF', () => {
+    const ti = new TextInput()
+    ti.insertText('x\r\ny\rz\nw')
+    expect(ti.text).toBe('x\ny\nz\nw')
+  })
+
+  test('粘贴清除 stickyCol', () => {
+    const ti = new TextInput()
+    ti.text = 'hello'
+    ti.cursorOffset = 5
+    ti.stickyCol = 3
+    ti.insertText('!!')
+    expect(ti.stickyCol).toBeNull()
+    expect(ti.text).toBe('hello!!')
+  })
+
+  test('粘贴含 CJK 文本，cursorOffset 用 UTF-16 长度', () => {
+    const ti = new TextInput()
+    ti.insertText('你好')
+    expect(ti.text).toBe('你好')
+    expect(ti.cursorOffset).toBe(2)
   })
 })

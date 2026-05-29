@@ -10,7 +10,7 @@
  */
 
 import { Grid } from '../src/grid.ts'
-import { TextInput } from '../src/text-input.ts'
+import { TextInput } from '../src/text-input'
 import { Viewport } from '../src/viewport.ts'
 import { parseKey } from '../src/keys.ts'
 

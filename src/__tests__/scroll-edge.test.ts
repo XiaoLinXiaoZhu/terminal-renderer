@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test'
 import { Grid } from '../grid.ts'
-import { TextInput } from '../text-input.ts'
+import { TextInput } from '../text-input'
 
 describe('TextInput — moveUp/moveDown 在非零起始行的滚动', () => {
   it('input 区域不从 row 0 开始时，顶部按 ↑ 应触发向上滚动', () => {

@@ -8,7 +8,7 @@
  */
 
 import { Grid, encodeStyle, BOLD, DIM, ITALIC } from '../src/grid.ts'
-import { TextInput } from '../src/text-input.ts'
+import { TextInput } from '../src/text-input'
 import { Viewport } from '../src/viewport.ts'
 import { parseKey } from '../src/keys.ts'
 import { charWidth } from '../src/width.ts'

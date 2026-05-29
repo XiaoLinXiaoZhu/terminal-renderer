@@ -13,7 +13,7 @@
  */
 
 import { Grid, sgrFromEncoded } from '../../src/grid.ts'
-import { TextInput } from '../../src/text-input.ts'
+import { TextInput } from '../../src/text-input'
 import { Menu } from '../../src/menu.ts'
 import { Viewport } from '../../src/viewport.ts'
 import { parseKey } from '../../src/keys.ts'
@@ -234,7 +234,7 @@ process.stdin.on('data', (buf: Buffer) => {
         const pasted = pasteFromClipboard()
         if (pasted != null) {
           if (sel.active) { ti.text = deleteSelection() }
-          ti.insertChar(pasted)
+          ti.insertText(pasted)
         }
         break
       }

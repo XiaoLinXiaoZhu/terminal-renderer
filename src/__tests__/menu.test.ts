@@ -94,7 +94,7 @@ describe('Menu — Step 3.2', () => {
 
 describe('TextInput + Menu — Step 3.1 & 3.3: Ownership 切换', () => {
   test('ownership 变化后 TextInput 重排正确', () => {
-    const { TextInput } = require('../text-input.ts')
+    const { TextInput } = require('../text-input')
     const grid = Grid.create(10, 3)
     grid.setOwnerAll('input')
 
@@ -124,7 +124,7 @@ describe('TextInput + Menu — Step 3.1 & 3.3: Ownership 切换', () => {
   })
 
   test('区域缩小时文本折行变化', () => {
-    const { TextInput } = require('../text-input.ts')
+    const { TextInput } = require('../text-input')
     const grid = Grid.create(10, 4)
     grid.setOwnerAll('input')
 
@@ -151,7 +151,7 @@ describe('TextInput + Menu — Step 3.1 & 3.3: Ownership 切换', () => {
   })
 
   test('区域恢复时文本折行恢复', () => {
-    const { TextInput } = require('../text-input.ts')
+    const { TextInput } = require('../text-input')
     const grid = Grid.create(10, 3)
     grid.setOwnerAll('input')
 
@@ -175,7 +175,7 @@ describe('TextInput + Menu — Step 3.1 & 3.3: Ownership 切换', () => {
   })
 
   test('菜单打开时 TextInput 文本绕开菜单区域', () => {
-    const { TextInput } = require('../text-input.ts')
+    const { TextInput } = require('../text-input')
     const grid = Grid.create(10, 4)
     grid.setOwnerAll('input')
 
@@ -202,7 +202,7 @@ describe('TextInput + Menu — Step 3.1 & 3.3: Ownership 切换', () => {
   })
 
   test('选中后文本正确插入', () => {
-    const { TextInput } = require('../text-input.ts')
+    const { TextInput } = require('../text-input')
     const ti = new TextInput()
     ti.text = 'Hello @'
     ti.cursorOffset = 7
@@ -215,7 +215,7 @@ describe('TextInput + Menu — Step 3.1 & 3.3: Ownership 切换', () => {
   })
 
   test('关闭后区域恢复', () => {
-    const { TextInput } = require('../text-input.ts')
+    const { TextInput } = require('../text-input')
     const grid = Grid.create(10, 3)
     grid.setOwnerAll('input')
 
